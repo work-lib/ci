@@ -8,7 +8,7 @@ on:
   workflow_call:
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
-        required: false
+        required: true
 # QA and preprod
       AWS_ACCESS_KEY_ID_DEV:
         required: true
