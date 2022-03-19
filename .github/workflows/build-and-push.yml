@@ -1,0 +1,242 @@
+name: Build and Push
+# trigger by push on tag                                        -> create an image on prod    with ecr tag equal to git tag
+# trigger by push on develop branch                             -> create an image on preprod and update preprod with the last image tagged develop
+# trigger by workflow dispatch on master                        -> Do nothing (exit 1)
+# trigger by workflow dispatch on all branches except master    -> create an image on preprod with ecr tag equal to the name of the branch (after last / feature/mafeature -> mafeature)
+
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - dev
+      - staging
+      - ci
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: service-workflow
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.set-tag.outputs.branch }}
+    steps:
+
+    - name: Deployment details
+      run: echo "Pipeline run by '${{GITHUB.EVENT_NAME}}' on ${{GITHUB.REF_TYPE}} '${{github.ref_name}}' for '${{github.repository}}'"
+
+
+    - name: Checkout (push on branch or push on tag or workflow_dispatch without tag )
+      uses: actions/checkout@v2
+      with:
+          fetch-depth: 0 # OR "2" -> To retrieve the preceding commit.
+          ref: ${{ github.ref_name }}
+
+    - name: Set tag
+      id: set-tag
+      run: |
+        if [[ ${GITHUB_REF_TYPE} == 'tag' ]]; then
+          echo "Git tag detected"
+          GIT_BRANCH="master"
+          GIT_TAG=${{github.ref_name}}
+        else
+          echo "Git branch detected"
+          # If branch name is feature/myfeature, only extract "myfeature"
+          GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+
+          if [[ $GIT_BRANCH == 'master' ]]; then
+            echo "Workflow run on master branch, aborting."
+            exit 1
+          fi
+        fi
+        MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
+        MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
+
+        echo "GIT_BRANCH: ${GIT_BRANCH}"
+        echo "GIT_TAG: ${GIT_TAG}"
+        echo "MICROSERVICE = ${MICROSERVICE}"
+        echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
+        echo '::set-output name=branch::'$GIT_BRANCH
+        echo '::set-output name=tag::'$GIT_TAG
+        echo '::set-output name=microservice::'$MICROSERVICE
+        echo '::set-output name=microservice_short_name::'$MICROSERVICE_SHORT_NAME
+
+
+    - uses: kanga333/variable-mapper@master
+      with:
+        key: "${{ steps.set-tag.outputs.branch }}"
+        map: |
+          {
+            "master": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}",
+              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
+              "EKS_CLUSTER_NAME": "gek-prd",
+              "environment": "production",
+              "NODE_ENV": "production",
+              "K8S_NAMESPACE":"worklib",
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+            },
+            "staging": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
+              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
+              "EKS_CLUSTER_NAME": "gek-ppd",
+              "environment": "preprod",
+              "NODE_ENV": "staging-aws",
+              "K8S_NAMESPACE":"worklib",
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+            },
+            ".*": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
+              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
+              "EKS_CLUSTER_NAME": "gek-ppd",
+              "environment": "qa",
+              "NODE_ENV": "qa",
+              "K8S_NAMESPACE":"worklib-qa",
+              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+            }
+          }
+
+    - name: Send notification to Slack
+      id: slack
+      uses: slackapi/slack-github-action@v1.18.0
+      with:
+        # For posting a rich message using Block Kit
+        payload: |
+          {
+            "text": "Deployment started for `${{ env.environment }}` on `${{ steps.set-tag.outputs.microservice_short_name }}`",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*${{ github.actor }}* started the <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> on `${{ env.environment }}` env for `${{ steps.set-tag.outputs.microservice_short_name }}` ${{ github.ref_type }} `${{github.ref_name}}`"
+                    }
+                }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{env.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key:  ${{env.AWS_SECRET_ACCESS_KEY }}
+        role-external-id: ${{ env.AWS_ROLE_EXTERNAL_ID }}
+        role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+        role-duration-seconds: 1200
+        role-skip-session-tagging: true
+        aws-region: eu-west-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push the image to Amazon ECR
+      id: build-image-service
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ env.REPO_NAME }}
+        IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
+        DOCKER_BUILDKIT: 1
+        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
+      if: (steps.set-tag.outputs.branch != 'ci')
+      run: |
+        echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
+
+        # Build a docker container and push it to ECR
+        docker build --ssh ssh_key=/tmp/ssh.key --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        echo "Pushing image to ECR...$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+    - name: Deploy to EKS Cluster (preprod only)
+      env:
+        IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
+        MICROSERVICE_SHORT_NAME: ${{ steps.set-tag.outputs.microservice_short_name }}
+      if: (steps.set-tag.outputs.branch != 'master')&&(steps.set-tag.outputs.branch != 'ci')
+      run: |
+       aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
+
+       # set the environment variables
+       cd deploy/k8s_ci/
+       ./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG
+       cd -
+       
+       # delete job to prevent failure if it already exists 
+       kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
+
+       # Deploy api
+       kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
+
+       # output deployment status
+       kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
+
+       # output migration logs
+       #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
+       kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+  notification:
+    needs: build
+    if: always() && (needs.build.outputs.branch !='master')
+    name: slackNotificationResult
+    runs-on: ubuntu-latest
+    steps:
+    - uses: kanga333/variable-mapper@master
+      with:
+        key: "${{ needs.build.outputs.branch }}"
+        map: |
+          {
+            "master": {
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+            },
+            "staging": {
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+            },
+            ".*": {
+              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+            }
+          }
+
+    - name: Send notification to Slack
+      id: slack
+      uses: slackapi/slack-github-action@v1.18.0
+      with:
+        # For posting a rich message using Block Kit
+        payload: |
+          {
+            "text": "Deployment finished",
+            "blocks": [
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "image",
+                            "image_url": "https://worklib-storage-prod.s3.eu-west-1.amazonaws.com/system/${{ needs.build.result}}.png",
+                            "alt_text": "status icon"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> finished with status: *${{ needs.build.result }}*"
+                        }
+                    ]
+                },
+                {
+                  "type": "divider"
+                }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
