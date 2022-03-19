@@ -1,0 +1,23 @@
+name: 'init_variables'
+description: 'Init variables before main forkflow starts'
+#branding:
+#  color: green
+#  icon: arrow-right
+#author: 'zzz'
+#inputs:
+#  key:
+#    description: 'Key to match the map argument'
+outputs:
+  random-number:
+    description: "Random number"
+    value: ${{ steps.random-number-generator.outputs.random-id }}
+runs:
+  using: "composite"
+  steps:
+    - id: random-number-generator
+      run: echo "::set-output name=random-id::$(echo $RANDOM)"
+      shell: bash
+#    - run: echo "${{ github.action_path }}" >> $GITHUB_PATH
+#      shell: bash          
+#    - run: goodbye.sh
+#      shell: bash
