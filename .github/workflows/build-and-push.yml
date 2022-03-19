@@ -7,6 +7,7 @@ name: Build and Push
 on:
   workflow_call:
     secrets:
+# QA and preprod
       AWS_ACCESS_KEY_ID_DEV:
         required: true
       AWS_SECRET_ACCESS_KEY_DEV:
@@ -16,6 +17,20 @@ on:
       AWS_ROLE_TO_ASSUME_DEV:
         required: true
       QA_SLACK_WEBHOOK_URL:
+        required: true
+# preprod
+      PPD_SLACK_WEBHOOK_URL:
+        required: true
+# prod
+      AWS_ACCESS_KEY_ID_PROD:
+        required: true
+      AWS_SECRET_ACCESS_KEY_PROD:
+        required: true
+      AWS_ROLE_EXTERNAL_ID_PROD:
+        required: true
+      AWS_ROLE_TO_ASSUME_PROD:
+        required: true
+      PRD_SLACK_WEBHOOK_URL:
         required: true
 
 jobs:
