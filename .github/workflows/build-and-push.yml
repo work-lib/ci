@@ -6,17 +6,17 @@ name: Build and Push
 
 on:
   workflow_call
-  secrets:
-    AWS_ACCESS_KEY_ID_DEV:
-      required: true
-    AWS_SECRET_ACCESS_KEY_DEV:
-      required: true
-    AWS_ROLE_EXTERNAL_ID_DEV:
-      required: true
-    AWS_ROLE_TO_ASSUME_DEV:
-      required: true
-    QA_SLACK_WEBHOOK_URL:
-      required: true
+    secrets:
+      AWS_ACCESS_KEY_ID_DEV:
+        required: true
+      AWS_SECRET_ACCESS_KEY_DEV:
+        required: true
+      AWS_ROLE_EXTERNAL_ID_DEV:
+        required: true
+      AWS_ROLE_TO_ASSUME_DEV:
+        required: true
+      QA_SLACK_WEBHOOK_URL:
+        required: true
 
 jobs:
   build:
