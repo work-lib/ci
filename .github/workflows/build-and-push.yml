@@ -6,6 +6,11 @@ name: Build and Push
 
 on:
   workflow_call:
+    inputs:
+      NEEDS_MIGRATION:
+        type: boolean
+        required: false    
+        default: false
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -196,8 +201,10 @@ jobs:
        ./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
-       # delete job to prevent failure if it already exists 
-       kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
+       if ${{ env.NEEDS_MIGRATION }}; then
+           # delete job to prevent failure if it already exists 
+           kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
+       fi
 
        # Deploy api
        kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
@@ -205,9 +212,11 @@ jobs:
        # output deployment status
        kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
 
-       # output migration logs
-       #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
-       kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+       if ${{ env.NEEDS_MIGRATION }}; then
+           # output migration logs
+           #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
+           kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+       fi
   notification:
     needs: build
     if: always() && (needs.build.outputs.branch !='master')
