@@ -83,6 +83,7 @@ jobs:
         echo "GIT_TAG: ${GIT_TAG}"
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
+        echo "NEEDS_MIGRATION = ${NEEDS_MIGRATION}"
         echo '::set-output name=branch::'$GIT_BRANCH
         echo '::set-output name=tag::'$GIT_TAG
         echo '::set-output name=microservice::'$MICROSERVICE
@@ -180,10 +181,15 @@ jobs:
         WORKLIB_GITHUB_SSH_KEY: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
       if: (steps.set-tag.outputs.branch != 'ci')
       run: |
-        echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
-
-        # Build a docker container and push it to ECR
-        docker build --ssh ssh_key=/tmp/ssh.key --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+       # apply ssh key if it is passed and needed for docker build
+       if [ -z $WORKLIB_GITHUB_SSH_KEY ] then;
+            docker build --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        else
+            echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
+            # Build a docker container and push it to ECR
+            docker build --ssh ssh_key=/tmp/ssh.key --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        fi
+        
         echo "Pushing image to ECR...$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
