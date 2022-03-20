@@ -11,10 +11,6 @@ on:
         type: boolean
         required: false    
         default: false
-      TEST_VAR:
-        type: string
-        required: false    
-        default: "test"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -88,7 +84,6 @@ jobs:
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
-        echo "TEST_VAR = ${{ inputs.TEST_VAR }}"
         
         echo '::set-output name=branch::'$GIT_BRANCH
         echo '::set-output name=tag::'$GIT_TAG
@@ -213,7 +208,7 @@ jobs:
        ./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
-       if ${{ env.NEEDS_MIGRATION }}; then
+       if ${{ inputs.NEEDS_MIGRATION }}; then
            # delete job to prevent failure if it already exists 
            kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
        fi
@@ -224,7 +219,7 @@ jobs:
        # output deployment status
        kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
 
-       if ${{ env.NEEDS_MIGRATION }}; then
+       if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
            #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
            kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
