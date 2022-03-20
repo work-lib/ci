@@ -183,7 +183,7 @@ jobs:
       if: (steps.set-tag.outputs.branch != 'ci')
       run: |
        # apply ssh key if it is passed and needed for docker build
-       if [ -z $WORKLIB_GITHUB_SSH_KEY ] then;
+       if [ -z "$WORKLIB_GITHUB_SSH_KEY" ]; then
             docker build --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         else
             echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
