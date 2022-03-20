@@ -11,6 +11,10 @@ on:
         type: boolean
         required: false    
         default: false
+      TEST_VAR:
+        type: string
+        required: false    
+        default: "test"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -84,6 +88,8 @@ jobs:
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
         echo "NEEDS_MIGRATION = ${{ env.NEEDS_MIGRATION }}"
+        echo "TEST_VAR = ${{ env.TEST_VAR }}"
+        
         echo '::set-output name=branch::'$GIT_BRANCH
         echo '::set-output name=tag::'$GIT_TAG
         echo '::set-output name=microservice::'$MICROSERVICE
