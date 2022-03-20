@@ -83,7 +83,7 @@ jobs:
         echo "GIT_TAG: ${GIT_TAG}"
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
-        echo "NEEDS_MIGRATION = ${NEEDS_MIGRATION}"
+        echo "NEEDS_MIGRATION = ${env.NEEDS_MIGRATION}"
         echo '::set-output name=branch::'$GIT_BRANCH
         echo '::set-output name=tag::'$GIT_TAG
         echo '::set-output name=microservice::'$MICROSERVICE
