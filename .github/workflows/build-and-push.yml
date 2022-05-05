@@ -201,6 +201,7 @@ jobs:
         MICROSERVICE_SHORT_NAME: ${{ steps.set-tag.outputs.microservice_short_name }}
       if: (steps.set-tag.outputs.branch != 'master')&&(steps.set-tag.outputs.branch != 'ci')
       run: |
+
        aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
 
        # set the environment variables
@@ -208,21 +209,23 @@ jobs:
        ./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
+       curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.22.6/bin/linux/amd64/kubectl
+       chmod a+rx kubectl
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # delete job to prevent failure if it already exists 
-           kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
+           ./kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || echo "job-$MICROSERVICE_SHORT_NAME-migration does not exists, it is ok"
        fi
 
        # Deploy api
-       kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
+       ./kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
 
        # output deployment status
-       kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
+       ./kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
            #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
-           kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+           ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
        fi
   notification:
     needs: build
