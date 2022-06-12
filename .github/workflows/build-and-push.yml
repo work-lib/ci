@@ -202,6 +202,9 @@ jobs:
 
     - name: Create DB dump
       run: |
+        echo "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
+        chmod 600 /tmp/ssh.key        
+
         date=$(date '+%Y-%m-%d %H:%M:%S')
         db=service-${{ steps.set-tag.outputs.microservice_short_name }}
         echo "ssh -i /tmp/ssh.key -L 1234:rds-pgsql-ppd.chphzv1otbuz.eu-west-1.rds.amazonaws.com:5432 admin-ppd@54.170.18.87 -N -f"
