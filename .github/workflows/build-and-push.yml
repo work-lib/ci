@@ -47,6 +47,8 @@ jobs:
     outputs:
       branch: ${{ steps.set-tag.outputs.branch }}
       microservice: ${{ steps.set-tag.outputs.microservice_short_name }}
+      deploy_type: ${{ steps.set-tag.outputs.deploy_type }}
+      
     steps:
 
     - name: Deployment details
@@ -66,11 +68,13 @@ jobs:
           echo "Git tag detected"
           GIT_BRANCH="master"
           GIT_TAG=${{github.ref_name}}
+          deploy_type="build"
         else
           echo "Git branch detected"
           # If branch name is feature/myfeature, only extract "myfeature"
           GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          deploy_type="deployment"
 
           if [[ $GIT_BRANCH == 'master' ]]; then
             echo "Workflow run on master branch, aborting."
@@ -90,7 +94,7 @@ jobs:
         echo '::set-output name=tag::'$GIT_TAG
         echo '::set-output name=microservice::'$MICROSERVICE
         echo '::set-output name=microservice_short_name::'$MICROSERVICE_SHORT_NAME
-
+        echo '::set-output name=deploy_type::'$deploy_type
 
     - uses: kanga333/variable-mapper@master
       with:
@@ -142,7 +146,7 @@ jobs:
         # For posting a rich message using Block Kit
         payload: |
           {
-            "text": "Deployment started for `${{ env.environment }}` on `${{ steps.set-tag.outputs.microservice_short_name }}`",
+            "text": "${{ steps.set-tag.outputs.deploy_type}} started for `${{ env.environment }}` on `${{ steps.set-tag.outputs.microservice_short_name }}`",
             "blocks": [
                 {
                     "type": "section",
@@ -269,7 +273,7 @@ jobs:
                         },
                         {
                             "type": "mrkdwn",
-                            "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> for `${{ needs.build.outputs.microservice }}` finished with status: *${{ needs.build.result }}*"
+                            "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|${{ needs.build.outputs.deploy_type }}> finished for `${{ needs.build.outputs.microservice }}` with status: *${{ needs.build.result }}*"
                         }
                     ]
                 },
