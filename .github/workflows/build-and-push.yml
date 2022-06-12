@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.set-tag.outputs.branch }}
+      microservice: ${{ steps.set-tag.outputs.microservice_short_name }}
     steps:
 
     - name: Deployment details
@@ -268,7 +269,7 @@ jobs:
                         },
                         {
                             "type": "mrkdwn",
-                            "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> finished with status: *${{ needs.build.result }}*"
+                            "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> for `${{ needs.build.outputs.microservice }}` finished with status: *${{ needs.build.result }}*"
                         }
                     ]
                 },
