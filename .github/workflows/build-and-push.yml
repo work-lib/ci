@@ -201,7 +201,6 @@ jobs:
         echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
     - name: Create DB dump
-      if: (steps.set-tag.outputs.branch = 'ci')
       run: |
         date=$(date '+%Y-%m-%d %H:%M:%S')
         db=service-${{ steps.set-tag.outputs.microservice_short_name }}
