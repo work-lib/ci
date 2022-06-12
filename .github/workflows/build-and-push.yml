@@ -202,18 +202,21 @@ jobs:
 
     - name: Create DB dump
       run: |
-        echo "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
-        chmod 600 /tmp/ssh.key        
+        echo "test" > /tmp/test.txt
+        aws s3 cp "/tmp/test.txt" s3://worklib-storage-preprod/pg_dump/
 
-        date=$(date '+%Y-%m-%d %H:%M:%S')
-        db=service-${{ steps.set-tag.outputs.microservice_short_name }}
-        echo "ssh -i /tmp/ssh.key -L 1234:rds-pgsql-ppd.chphzv1otbuz.eu-west-1.rds.amazonaws.com:5432 admin-ppd@54.170.18.87 -N -f"
-        ssh -i /tmp/ssh.key -L 1234:rds-pgsql-ppd.chphzv1otbuz.eu-west-1.rds.amazonaws.com:5432 admin-ppd@54.170.18.87 -N -f
-        export PGPASSWORD="${{ secrets.PPD_POSTGRES_DB_PASSWORD }}"
-        pg_dump -U gek_tma -d $db --host localhost --port 1234 -f "/tmp/ppd-dump-$db-$date"
-        ls -la "/tmp/ppd-dump-$db-$date"
-        # upload the db dump
-        aws s3 cp "/tmp/ppd-dump-$db-$date" s3://worklib-storage-preprod/pg_dump/
+        #echo "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
+        #chmod 600 /tmp/ssh.key        
+
+        #date=$(date '+%Y-%m-%d %H:%M:%S')
+        #db=service-${{ steps.set-tag.outputs.microservice_short_name }}
+        #echo "ssh -i /tmp/ssh.key -L 1234:rds-pgsql-ppd.chphzv1otbuz.eu-west-1.rds.amazonaws.com:5432 admin-ppd@54.170.18.87 -N -f"
+        #ssh -i /tmp/ssh.key -L 1234:rds-pgsql-ppd.chphzv1otbuz.eu-west-1.rds.amazonaws.com:5432 admin-ppd@54.170.18.87 -N -f
+        #export PGPASSWORD="${{ secrets.PPD_POSTGRES_DB_PASSWORD }}"
+        #pg_dump -U gek_tma -d $db --host localhost --port 1234 -f "/tmp/ppd-dump-$db-$date"
+        #ls -la "/tmp/ppd-dump-$db-$date"
+        ## upload the db dump
+        #aws s3 cp "/tmp/ppd-dump-$db-$date" s3://worklib-storage-preprod/pg_dump/
 
       
     - name: Deploy to EKS Cluster (preprod only)
