@@ -202,8 +202,10 @@ jobs:
 
     - name: Create DB dump
       run: |
-        echo "test" > /tmp/test.txt
-        aws s3 cp "/tmp/test.txt" s3://worklib-storage-preprod/pg_dump/
+        #echo "test" > /tmp/test.txt
+        #aws s3 cp "/tmp/test.txt" s3://worklib-storage-preprod/pg_dump/
+        aws rds create-db-snapshot --db-instance-identifier rds-pgsql-prd --db-snapshot-identifier test-snapshot
+        
 
         #echo "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
         #chmod 600 /tmp/ssh.key        
