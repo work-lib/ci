@@ -170,6 +170,8 @@ jobs:
             echo "creating a snapshot: $snapshot_name"
             echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
             aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            # wait till it finishes
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
         fi
 
     - name: Deploy to EKS Cluster
