@@ -65,7 +65,7 @@ jobs:
     - name: Set tag
       id: set-tag
       run: |
-        GIT_TAG = ${{ github.event.inputs.image-tag }}
+        GIT_TAG="${{ github.event.inputs.image-tag }}"
         GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
         
         MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
