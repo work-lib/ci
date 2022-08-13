@@ -101,7 +101,8 @@ jobs:
               "environment": "production",
               "NODE_ENV": "production",
               "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}",
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd"
             },
             "preprod": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
@@ -113,7 +114,8 @@ jobs:
               "environment": "preprod",
               "NODE_ENV": "staging-aws",
               "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}",
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
             },
             ".*": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
@@ -125,7 +127,8 @@ jobs:
               "environment": "qa",
               "NODE_ENV": "qa",
               "K8S_NAMESPACE":"worklib-qa",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}",
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
             }
           }
     - name: Configure AWS credentials
@@ -153,6 +156,24 @@ jobs:
         # Build a docker container and push it to ECR
         echo "Pull image from ECR..."
         docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+    - name: DB snapshot
+      if: ( inputs.NEEDS_MIGRATION )
+      run: |
+        # name of the snapshot will be like "rds-pgsql-prd-2022-08-13"
+        snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
+
+        if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
+            echo "the snapshot already exists: $snapshot_name"; 
+        else 
+            # creates a snapshot of all the postgres DB instance
+            echo "creating a snapshot: $snapshot_name"
+            echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
+            aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            # wait till it finishes
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        fi
+
     - name: Deploy to EKS Cluster
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
