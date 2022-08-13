@@ -3,6 +3,8 @@ name: Deploy to EKS
 on:
   workflow_call:
     inputs:  
+      TARGET_ENV:
+        required: true
       NEEDS_MIGRATION:
         type: boolean
         required: false    
@@ -62,25 +64,15 @@ jobs:
     - name: Set tag
       id: set-tag
       run: |
-        if [[ ${GITHUB_REF_TYPE} == 'tag' ]]; then
-          echo "Git tag detected"
-          GIT_BRANCH="master"
-          GIT_TAG=${{github.ref_name}}
-          # deploy_type="build"
-        else
-          echo "Git branch detected"
-          # If branch name is feature/myfeature, only extract "myfeature"
-          GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
-
-          #if [[ $GIT_BRANCH == 'master' ]]; then
-          #  echo "Workflow run on master branch, aborting."
-          #  exit 1
-          #fi
-        fi
-        deploy_type="deployment"
+        GIT_TAG = ${{ github.event.inputs.image-tag }}
+        GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+        
         MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
+        deploy_type="deployment"
+
+        echo 'TEST_MODE='${{ inputs.TEST_MODE }}
+        echo 'TARGET_ENV='${{ inputs.TARGET_ENV }}
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
@@ -93,13 +85,12 @@ jobs:
         echo '::set-output name=microservice::'$MICROSERVICE
         echo '::set-output name=microservice_short_name::'$MICROSERVICE_SHORT_NAME
         echo '::set-output name=deploy_type::'$deploy_type
-        echo 'TEST_MODE='${{ inputs.TEST_MODE }}
     - uses: kanga333/variable-mapper@master
       with:
-        key: "${{ steps.set-tag.outputs.branch }}"
+        key: "${{ inputs.TARGET_ENV }}"
         map: |
           {
-            "master": {
+            "production": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
               "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
@@ -111,7 +102,7 @@ jobs:
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
-            "staging": {
+            "preprod": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
               "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
