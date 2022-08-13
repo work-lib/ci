@@ -72,8 +72,8 @@ jobs:
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
         deploy_type="deployment"
 
-        echo 'TEST_MODE='${{ inputs.TEST_MODE }}
         echo 'TARGET_ENV='${{ inputs.TARGET_ENV }}
+        echo 'TEST_MODE='${{ inputs.TEST_MODE }}
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
@@ -202,13 +202,13 @@ jobs:
     steps:
     - uses: kanga333/variable-mapper@master
       with:
-        key: "${{ needs.build.outputs.branch }}"
+        key: "${{ inputs.TARGET_ENV }}"
         map: |
           {
-            "master": {
+            "production": {
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
-            "staging": {
+            "preprod": {
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
             },
             ".*": {
