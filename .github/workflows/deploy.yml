@@ -4,6 +4,7 @@ on:
   workflow_call:
     inputs:  
       TARGET_ENV:
+        type: string
         required: true
       NEEDS_MIGRATION:
         type: boolean
