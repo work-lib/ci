@@ -192,10 +192,12 @@ jobs:
 
        if ${{ inputs.TEST_MODE }}; then 
             echo "./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG"
-            echo "./kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}"
+            if ${{ inputs.NEEDS_MIGRATION }}; then
+                echo "./kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}"
+                echo "./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}"
+            fi
             echo "./kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}"
             echo "./kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}"
-            echo "./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}"
        else
            if ${{ inputs.NEEDS_MIGRATION }}; then
                # delete job to prevent failure if it already exists 
