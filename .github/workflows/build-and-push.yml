@@ -234,8 +234,9 @@ jobs:
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
-           kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n ${{ env.K8S_NAMESPACE }}
-           ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+           if (kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n ${{ env.K8S_NAMESPACE }}); then
+            ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+           fi
        fi
 
        # output deployment status
