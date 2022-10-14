@@ -232,14 +232,15 @@ jobs:
        # Deploy api
        ./kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
 
+       if ${{ inputs.NEEDS_MIGRATION }}; then
+           # output migration logs
+           kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n ${{ env.K8S_NAMESPACE }}
+           ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+       fi
+
        # output deployment status
        ./kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
 
-       if ${{ inputs.NEEDS_MIGRATION }}; then
-           # output migration logs
-           #kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n worklib
-           ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
-       fi
   notification:
     needs: build
     if: always() && (needs.build.outputs.branch !='master')
