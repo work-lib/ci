@@ -164,7 +164,9 @@ jobs:
         snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
 
         if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
-            echo "the snapshot already exists: $snapshot_name"; 
+            echo "the snapshot already exists: $snapshot_name, waiting when it is complete.."; 
+            # if the snapsot exists but in progress we have to wait till it finishes
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
         else 
             # creates a snapshot of all the postgres DB instance
             echo "creating a snapshot: $snapshot_name"
