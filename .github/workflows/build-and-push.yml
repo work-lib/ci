@@ -98,11 +98,20 @@ jobs:
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
         
-        echo '::set-output name=branch::'$GIT_BRANCH
-        echo '::set-output name=tag::'$GIT_TAG
-        echo '::set-output name=microservice::'$MICROSERVICE
-        echo '::set-output name=microservice_short_name::'$MICROSERVICE_SHORT_NAME
-        echo '::set-output name=deploy_type::'$deploy_type
+        #echo '::set-output name=branch::'$GIT_BRANCH
+        echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
+
+        #echo '::set-output name=tag::'$GIT_TAG
+        echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
+
+        #echo '::set-output name=microservice::'$MICROSERVICE
+        echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
+
+        #echo '::set-output name=microservice_short_name::'$MICROSERVICE_SHORT_NAME
+        echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
+
+        #echo '::set-output name=deploy_type::'$deploy_type
+        echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
 
     - uses: kanga333/variable-mapper@master
       with:
