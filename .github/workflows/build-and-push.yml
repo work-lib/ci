@@ -225,6 +225,7 @@ jobs:
          mysnap2=$(cat mysnap1 | grep "${{ env.DB-INSTANCE-IDENTIFIER }}" 2>/tmp/log2 )
          cat /tmp/log2
          echo mysnap2
+         
 
     - name: Deploy to EKS Cluster (preprod only)
       env:
