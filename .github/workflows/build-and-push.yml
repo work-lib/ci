@@ -215,27 +215,28 @@ jobs:
       if: ( inputs.NEEDS_MIGRATION )
       run: |
         # name of the snapshot will be like "rds-pgsql-prd-2022-08-13"
-        snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
+        # snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
 
-        if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
-            echo "the snapshot already exists: $snapshot_name, waiting when it is complete.."; 
-            # if the snapsot exists but in progress we have to wait till it finishes
-            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
-        else 
-            # creates a snapshot of all the postgres DB instance
-            echo "creating a snapshot: $snapshot_name"
-            # echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
-            aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
-            # wait till it finishes
-            # aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
-        fi
+        # if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
+        #    echo "the snapshot already exists: $snapshot_name, waiting when it is complete.."; 
+        #    # if the snapsot exists but in progress we have to wait till it finishes
+        #    aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        # else 
+        #    # creates a snapshot of all the postgres DB instance
+        #    echo "creating a snapshot: $snapshot_name"
+        #    # echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
+        #    aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        #    # wait till it finishes
+        #    # aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        # fi
 
-        echo "deleting snapshots older 60 days 5"
-         oldsnap=$(date -I --date "now -60 days")
+        echo "deleting snapshots older 60 days 6"
+         # oldsnap=$(date -I --date "now -60 days")
+         oldsnap=2023-01-18
          echo "oldsnap=$oldsnap"
          mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" 2>/dev/null |grep "${{ env.DB-INSTANCE-IDENTIFIER }}")
-         echo "mysnap="
-         echo $mysnap
+         # echo "mysnap="
+         # echo $mysnap
          # for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i 2>/dev/null; done
 
     - name: Deploy to EKS Cluster (preprod only)
