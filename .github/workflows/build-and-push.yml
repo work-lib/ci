@@ -215,7 +215,7 @@ jobs:
       if: ( inputs.NEEDS_MIGRATION )
       run: |
          a1="aaa"
-         echo $a1 | grep "bbb"
+         echo $a1 | { grep "bbb" || true; }
     - name: Deploy to EKS Cluster (preprod only)
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
