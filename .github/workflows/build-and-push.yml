@@ -119,7 +119,7 @@ jobs:
               "environment": "production",
               "NODE_ENV": "production",
               "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}",
               "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd"
             },
             "staging": {
@@ -132,7 +132,7 @@ jobs:
               "environment": "preprod",
               "NODE_ENV": "staging-aws",
               "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}",
               "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
             },
             ".*": {
