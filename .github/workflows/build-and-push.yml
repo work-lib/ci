@@ -218,7 +218,7 @@ jobs:
         touch /tmp/log1
         touch /tmp/log2
         
-         mysnap1="rds-pgsql-ppd"
+         mysnap1="base-ppd-db-pgsql-myapp-cluster"
          echo $mysnap1
          echo $mysnap1 | grep "rds-pgsql-ppd" 2>/tmp/log1
          cat /tmp/log1
