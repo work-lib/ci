@@ -179,7 +179,7 @@ jobs:
         echo "deleting snapshots older 60 days"
         oldsnap=$(date -I --date "now -60 days")
         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" |grep "${{ env.DB-INSTANCE-IDENTIFIER }}")
-        for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i 2>/dev/null ; done
+        # for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i ; done
 
     - name: Deploy to EKS Cluster
       env:
