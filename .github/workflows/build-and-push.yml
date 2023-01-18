@@ -120,6 +120,7 @@ jobs:
               "NODE_ENV": "production",
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd"
             },
             "staging": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
@@ -132,6 +133,7 @@ jobs:
               "NODE_ENV": "staging-aws",
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
             },
             ".*": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
@@ -143,7 +145,8 @@ jobs:
               "environment": "qa",
               "NODE_ENV": "qa",
               "K8S_NAMESPACE":"worklib-qa",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}",
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
             }
           }
 
@@ -207,6 +210,32 @@ jobs:
         echo "Pushing image to ECR...$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: DB snapshot
+      if: ( inputs.NEEDS_MIGRATION )
+      run: |
+        # name of the snapshot will be like "rds-pgsql-prd-2022-08-13"
+        snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
+
+        if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
+            echo "the snapshot already exists: $snapshot_name, waiting when it is complete.."; 
+            # if the snapsot exists but in progress we have to wait till it finishes
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        else 
+            # creates a snapshot of all the postgres DB instance
+            echo "creating a snapshot: $snapshot_name"
+            # echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
+            aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            # wait till it finishes
+            # aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+        fi
+
+        echo "deleting snapshots older 60 days"
+        oldsnap=$(date -I --date "now -60 days")
+        mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" |grep "${{ env.DB-INSTANCE-IDENTIFIER }}")
+        echo "mysnap="
+        echo $mysnap
+        # for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i ; done
 
     - name: Deploy to EKS Cluster (preprod only)
       env:
