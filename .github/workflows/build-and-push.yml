@@ -214,15 +214,15 @@ jobs:
     - name: DB snapshot
       if: ( inputs.NEEDS_MIGRATION )
       run: |
-        echo "deleting snapshots older 60 days 11"
+        echo "deleting snapshots older 60 days 12"
         touch /tmp/log1
         touch /tmp/log2
         
-         oldsnap=2023-01-18
-         mysnap1=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" 2>/tmp/log1)
+         mysnap1="base-ppd-db-pgsql-myapp-cluster"
          echo $mysnap1
+         echo $mysnap1 | grep "rds-pgsql-ppd" 2>/tmp/log1
          cat /tmp/log1
-         mysnap2=$(echo $mysnap1 | grep "${{ env.DB-INSTANCE-IDENTIFIER }}" 2>/tmp/log2 )
+         mysnap2=$(echo $mysnap1 | grep "rds-pgsql-ppd" 2>/tmp/log2 )
          cat /tmp/log2
          echo $mysnap2
 
