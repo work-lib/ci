@@ -230,11 +230,11 @@ jobs:
             # aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
         fi
 
-        echo "deleting snapshots older 60 days 2"
-        # oldsnap=$(date -I --date "now -60 days")
-        # mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" |grep "${{ env.DB-INSTANCE-IDENTIFIER }}")
-        # echo "mysnap="
-        # echo $mysnap
+        echo "deleting snapshots older 60 days 3"
+         oldsnap=$(date -I --date "now -60 days")
+         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" |grep "${{ env.DB-INSTANCE-IDENTIFIER }}")
+         echo "mysnap="
+         echo $mysnap
         # for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i ; done
 
     - name: Deploy to EKS Cluster (preprod only)
