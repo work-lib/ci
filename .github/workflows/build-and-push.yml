@@ -220,7 +220,7 @@ jobs:
         
          mysnap1="base-ppd-db-pgsql-myapp-cluster"
          echo $mysnap1
-         echo "rds-pgsql-ppd" | grep "rds-pgsql-ppd" 2>/tmp/log1
+         echo $mysnap1 | grep "rds-pgsql-ppd" 2>/tmp/log1
          cat /tmp/log1
 
 
