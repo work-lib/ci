@@ -214,16 +214,8 @@ jobs:
     - name: DB snapshot
       if: ( inputs.NEEDS_MIGRATION )
       run: |
-        echo "deleting snapshots older 60 days 12"
-        touch /tmp/log1
-        touch /tmp/log2
-        
-         mysnap1="rds-pgsql-ppd==base-ppd-db-pgsql-myapp-cluster"
-         echo $mysnap1
-         echo $mysnap1 | grep "rds-pgsql-ppd" 2>/tmp/log1
-         cat /tmp/log1
-
-
+         a1="aaa"
+         echo $a1 | grep "bbb"
     - name: Deploy to EKS Cluster (preprod only)
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
