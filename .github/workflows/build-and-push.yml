@@ -214,9 +214,9 @@ jobs:
     - name: DB snapshot
       if: ( inputs.NEEDS_MIGRATION )
       run: |
-        echo "deleting snapshots older 60 days 9"
+        echo "deleting snapshots older 60 days 10"
          oldsnap=2023-01-18
-         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" 2>/dev/null )
+         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" 2>/dev/null | grep "${{ env.DB-INSTANCE-IDENTIFIER }}" 2>/dev/null )
 
     - name: Deploy to EKS Cluster (preprod only)
       env:
