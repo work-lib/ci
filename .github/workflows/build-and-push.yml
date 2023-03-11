@@ -100,6 +100,7 @@ jobs:
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
+        echo "deploy_type = ${deploy_type}"
         echo "migrationList = ${migrationList}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
