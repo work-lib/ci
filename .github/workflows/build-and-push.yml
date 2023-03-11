@@ -76,7 +76,7 @@ jobs:
           echo "Git tag detected"
           GIT_BRANCH="master"
           GIT_TAG=${{github.ref_name}}
-          deploy_type="build"
+          deploy_type="docker image build"
         else
           echo "Git branch detected"
           # If branch name is feature/myfeature, only extract "myfeature"
@@ -160,7 +160,7 @@ jobs:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "*${{ github.actor }}* started the <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|deployment> on `${{ env.environment }}` env for `${{ steps.set-tag.outputs.microservice_short_name }}` ${{ github.ref_type }} `${{github.ref_name}}`"
+                        "text": "*${{ github.actor }}* started the <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|${{ steps.set-tag.outputs.deploy_type}} > on `${{ env.environment }}` env for `${{ steps.set-tag.outputs.microservice_short_name }}` ${{ github.ref_type }} `${{github.ref_name}}`"
                     }
                 }
             ]
@@ -270,7 +270,7 @@ jobs:
         # For posting a rich message using Block Kit
         payload: |
           {
-            "text": "Deployment finished",
+            "text": "",
             "blocks": [
                 {
                     "type": "context",
