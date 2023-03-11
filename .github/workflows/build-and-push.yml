@@ -94,7 +94,8 @@ jobs:
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
         # test if there were changes in DB migrations
-        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
+        # migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
+        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/)
         # migrationList=$(ls -la ./migrations | base64)
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
@@ -110,10 +111,11 @@ jobs:
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
+        echo "migration_list=$migrationList" >> $GITHUB_OUTPUT
         # for multi-line output
-        echo "migration_list<<|" >> $GITHUB_OUTPUT
-        echo "$migrationList" >> $GITHUB_OUTPUT
-        echo "|" >> $GITHUB_OUTPUT
+        #echo "migration_list<<|" >> $GITHUB_OUTPUT
+        #echo "$migrationList" >> $GITHUB_OUTPUT
+        #echo "|" >> $GITHUB_OUTPUT
 
     - uses: kanga333/variable-mapper@master
       with:
