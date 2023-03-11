@@ -56,6 +56,7 @@ jobs:
       branch: ${{ steps.set-tag.outputs.branch }}
       microservice: ${{ steps.set-tag.outputs.microservice_short_name }}
       deploy_type: ${{ steps.set-tag.outputs.deploy_type }}
+      migration_list: ${{ steps.set-tag.outputs.migration_list }}
       
     steps:
 
@@ -288,12 +289,15 @@ jobs:
                         {
                             "type": "mrkdwn",
                             "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|${{ needs.build.outputs.deploy_type }}> finished for `${{ needs.build.outputs.microservice }}` with status: *${{ needs.build.result }}*"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": "${{ steps.set-tag.outputs.migration_list }}"
                         }
                     ]
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "${{ needs.build.outputs.migration_list }}"
+                    }
                 },
                 {
                   "type": "divider"
