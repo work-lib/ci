@@ -296,13 +296,6 @@ jobs:
                     ]
                 },
                 {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "${{ needs.build.outputs.migration_list }}"
-                    }
-                },
-                {
                   "type": "divider"
                 }
             ]
