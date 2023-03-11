@@ -107,7 +107,10 @@ jobs:
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
-        echo "migration_list=$migrationList" >> $GITHUB_OUTPUT
+        # for multi-line output
+        echo "migration_list<<EOF" >> $GITHUB_OUTPUT
+        echo "$migrationList" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
     - uses: kanga333/variable-mapper@master
       with:
