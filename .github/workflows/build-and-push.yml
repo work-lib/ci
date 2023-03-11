@@ -93,10 +93,7 @@ jobs:
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
         # test if there were changes in DB migrations
-        ls -la
-        echo "/////"
-        cd ${{github.ref_name}}
-        migrationList=$(git diff master --name-only --diff-filter=d | grep -q migrations/)
+        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep -q migrations/)
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
