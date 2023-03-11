@@ -92,17 +92,22 @@ jobs:
         MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
+        # test if there were changes in DB migrations
+        migrationList=$(git diff master --name-only --diff-filter=d | grep -q migrations/)
+
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
         echo "MICROSERVICE = ${MICROSERVICE}"
         echo "MICROSERVICE_SHORT_NAME = ${MICROSERVICE_SHORT_NAME}"
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
+        echo "migrationList = ${migrationList}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
+        echo "migration_list=$migrationList" >> $GITHUB_OUTPUT
 
     - uses: kanga333/variable-mapper@master
       with:
@@ -283,6 +288,15 @@ jobs:
                         {
                             "type": "mrkdwn",
                             "text": "The <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}?check_suite_focus=true|${{ needs.build.outputs.deploy_type }}> finished for `${{ needs.build.outputs.microservice }}` with status: *${{ needs.build.result }}*"
+                        }
+                    ]
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "${{ steps.set-tag.outputs.migration_list }}"
                         }
                     ]
                 },
