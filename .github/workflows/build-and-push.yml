@@ -300,7 +300,7 @@ jobs:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "${{ needs.build.outputs.migration_list }}"
+                        "text": "${{ needs.build.outputs.migration_list }} "
                     }
                 },
                 {
