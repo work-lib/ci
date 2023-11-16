@@ -246,6 +246,18 @@ jobs:
            # output migration logs
            kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=150s -n ${{ env.K8S_NAMESPACE }} || echo "Timeout error. DB migrations did not fit the timout of 150 sec. It does NOT mean that the deployment is failed, please check the PODs statuses manually"
            ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+
+            echo "before";
+            kubectl -n ${{ env.K8S_NAMESPACE }} wait job --for=condition=complete --timeout=30s job-$MICROSERVICE_SHORT_NAME-migration;
+            echo "after";
+            if [ "$(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs job-$MICROSERVICE_SHORT_NAME-migration -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')" = "True" ]; then 
+              echo "DB migration failed";  exit 1; 
+            elif [ "$(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs job-$MICROSERVICE_SHORT_NAME-migration -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}')" = "True" ]; then 
+              echo "DB migration succeed";  exit 0; 
+            else  
+              echo "Unknown error";  exit 1; 
+            fi;
+
        fi
 
        # output deployment status
