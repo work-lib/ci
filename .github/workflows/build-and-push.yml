@@ -94,7 +94,7 @@ jobs:
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
         # test if there were changes in DB migrations
-        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/)
+        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
@@ -109,7 +109,10 @@ jobs:
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
-        echo "migration_list=$migrationList" >> $GITHUB_OUTPUT
+        # for multi-line output
+        echo "migration_list<<|" >> $GITHUB_OUTPUT
+        echo "$migrationList" >> $GITHUB_OUTPUT
+        echo "|" >> $GITHUB_OUTPUT
 
     - uses: kanga333/variable-mapper@master
       with:
@@ -241,7 +244,7 @@ jobs:
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
-           kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=60s -n ${{ env.K8S_NAMESPACE }} || echo " error "
+           kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=150s -n ${{ env.K8S_NAMESPACE }} || echo "Timeout error. DB migrations did not fit the timout of 150 sec. It does NOT mean that the deployment is failed, please check the PODs statuses manually"
            ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
        fi
 
@@ -297,7 +300,7 @@ jobs:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "${{ needs.build.outputs.migration_list }}"
+                        "text": "${{ needs.build.outputs.migration_list }} "
                     }
                 },
                 {
