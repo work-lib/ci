@@ -102,7 +102,7 @@ jobs:
               "NODE_ENV": "production",
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}",
-              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd"
+              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd01"
             },
             "preprod": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
