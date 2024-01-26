@@ -143,6 +143,18 @@ jobs:
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
             },
+            "autotest": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
+              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
+              "EKS_CLUSTER_NAME": "gek-ppd",
+              "environment": "autotest",
+              "NODE_ENV": "autotest",
+              "K8S_NAMESPACE":"autotest",
+              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+            },
             ".*": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
