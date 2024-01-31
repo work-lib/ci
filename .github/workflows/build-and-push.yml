@@ -51,6 +51,7 @@ on:
 jobs:
   build:
     name: service-workflow
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.set-tag.outputs.branch }}
