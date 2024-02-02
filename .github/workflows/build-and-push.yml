@@ -19,6 +19,13 @@ on:
         type: boolean
         required: false    
         default: true
+      AUTOTEST_MODE:
+        type: boolean
+        required: false    
+        default: false
+      IMAGE_TAG:
+        type: string
+        required: false    
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -73,16 +80,26 @@ jobs:
     - name: Set tag
       id: set-tag
       run: |
-        if [[ ${GITHUB_REF_TYPE} == 'tag' ]]; then
+        if [[ ${{ inputs.IMAGE_TAG }} ]]; then
+          GIT_TAG=${{ inputs.IMAGE_TAG }}
+        else
+          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+        fi
+
+        if [[ ${{ inputs.AUTOTEST_MODE }} ]]; then
+          echo "AUTOTEST_MODE is running"
+          GIT_BRANCH="autotest"
+          deploy_type="autotest"
+        elif [[ ${GITHUB_REF_TYPE} == 'tag' ]]; then
           echo "Git tag detected"
           GIT_BRANCH="master"
-          GIT_TAG=${{github.ref_name}}
+          # GIT_TAG=${{github.ref_name}}
           deploy_type="docker image build"
         else
           echo "Git branch detected"
           # If branch name is feature/myfeature, only extract "myfeature"
           GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          # GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           deploy_type="deployment"
 
           if [[ $GIT_BRANCH == 'master' ]]; then
@@ -127,7 +144,6 @@ jobs:
               "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
               "EKS_CLUSTER_NAME": "gek-prd",
               "environment": "production",
-              "NODE_ENV": "production",
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
@@ -139,7 +155,6 @@ jobs:
               "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "preprod",
-              "NODE_ENV": "staging-aws",
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
             },
@@ -151,7 +166,6 @@ jobs:
               "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "autotest",
-              "NODE_ENV": "autotest",
               "K8S_NAMESPACE":"autotest",
               "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
             },
@@ -163,7 +177,6 @@ jobs:
               "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "qa",
-              "NODE_ENV": "qa",
               "K8S_NAMESPACE":"worklib-qa",
               "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
             }
@@ -241,7 +254,7 @@ jobs:
 
        # set the environment variables
        cd deploy/k8s_ci/
-       ./replace_parameters.sh ${{ env.environment }} ${{ env.NODE_ENV }} $MICROSERVICE_SHORT_NAME $IMAGE_TAG
+       ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
        curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.22.6/bin/linux/amd64/kubectl
