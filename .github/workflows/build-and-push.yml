@@ -248,13 +248,25 @@ jobs:
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         MICROSERVICE_SHORT_NAME: ${{ steps.set-tag.outputs.microservice_short_name }}
-      if: (steps.set-tag.outputs.branch != 'master')&&( inputs.NEEDS_DEPLOY == true )
+        MICROSERVICE: ${{ steps.set-tag.outputs.microservice }}
+      if: (steps.set-tag.outputs.branch != 'master')&&(steps.set-tag.outputs.branch != 'main')&&( inputs.NEEDS_DEPLOY == true )
       run: |
 
        aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
 
        # set the environment variables
-       cd deploy/k8s_ci/
+       if [ -d "deploy" ]; then
+         deploy_dir="deploy/k8s_ci"
+         sub_dir=""
+       elif [ -d "k8s" ]; then
+         deploy_dir="k8s"
+         sub_dir=$MICROSERVICE/
+       else
+         echo "deployment directory is not found";  
+         exit 1; 
+       fi
+
+       cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
@@ -266,7 +278,7 @@ jobs:
        fi
 
        # Deploy api
-       ./kubectl apply -k deploy/k8s_ci/overlays/${{ env.environment }}
+       ./kubectl apply -k $deploy_dir/overlays/$sub_dir${{ env.environment }}
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
@@ -286,11 +298,11 @@ jobs:
        fi
 
        # output deployment status
-       ./kubectl rollout status deployment service-$MICROSERVICE_SHORT_NAME -n ${{ env.K8S_NAMESPACE }}
+       ./kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
 
   notification:
     needs: build
-    if: always() && (needs.build.outputs.branch !='master')
+    if: always() && (needs.build.outputs.branch !='master') && (needs.build.outputs.branch !='main')
     name: slackNotificationResult
     runs-on: ubuntu-latest
     steps:
