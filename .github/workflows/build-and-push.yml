@@ -265,8 +265,8 @@ jobs:
          echo "deployment directory is not found";  
          exit 1; 
        fi
-      echo "deploy_dir=$deploy_dir"
-      echo "sub_dir=$sub_dir"
+        echo "deploy_dir=$deploy_dir"
+        echo "sub_dir=$sub_dir"
 
        cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
