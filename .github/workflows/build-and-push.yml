@@ -260,13 +260,13 @@ jobs:
          sub_dir=""
        elif [ -d "k8s" ]; then
          deploy_dir="k8s"
-         sub_dir="$MICROSERVICE/${{ env.environment }}"
+         sub_dir="${MICROSERVICE}/${{ env.environment }}"
        else
          echo "deployment directory is not found";  
          exit 1; 
        fi
-      echo "deploy_dir="$deploy_dir
-      echo "sub_dir="$sub_dir
+      echo "deploy_dir=$deploy_dir"
+      echo "sub_dir=$sub_dir"
 
        cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
@@ -281,7 +281,7 @@ jobs:
 
        # Deploy api
       echo "./kubectl apply -k $deploy_dir/overlays/$sub_dir"
-       ./kubectl apply -k $deploy_dir/overlays/$sub_dir
+       ./kubectl apply -k ${deploy_dir}/overlays/${sub_dir}
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
