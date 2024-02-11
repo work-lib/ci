@@ -26,6 +26,9 @@ on:
       IMAGE_TAG:
         type: string
         required: false    
+      MICROSERVICE:
+        type: string
+        required: false    
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -83,7 +86,9 @@ jobs:
         if [[ ${{ inputs.IMAGE_TAG }} ]]; then
           GIT_TAG=${{ inputs.IMAGE_TAG }}
         else
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
+          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
         fi
 
         if [[ ${{ inputs.AUTOTEST_MODE }} ]]; then
@@ -107,11 +112,19 @@ jobs:
             exit 1
           fi
         fi
-        MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
+
+        if [[ ${{ inputs.MICROSERVICE }} ]]; then
+          MICROSERVICE=${{ inputs.MICROSERVICE }}
+        else
+          MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
+        fi
+
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
         # test if there were changes in DB migrations
         migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
+
+        REPO_NAME="gekko/"$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
@@ -120,12 +133,14 @@ jobs:
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
         echo "deploy_type = ${deploy_type}"
         echo "migrationList = ${migrationList}"
+        echo "REPO_NAME = ${REPO_NAME}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
+        echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
         # for multi-line output
         echo "migration_list<<|" >> $GITHUB_OUTPUT
         echo "$migrationList" >> $GITHUB_OUTPUT
@@ -160,7 +175,7 @@ jobs:
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
               "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
               "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
-              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
+              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.REPO_NAME }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "qa",
               "K8S_NAMESPACE":"worklib-qa",
