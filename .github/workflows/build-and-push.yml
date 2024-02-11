@@ -280,7 +280,7 @@ jobs:
        fi
 
        # Deploy api
-      echo "./kubectl apply -k $deploy_dir/overlays/$sub_dir"
+       echo "./kubectl apply -k $deploy_dir/overlays/$sub_dir"
        ./kubectl apply -k ${deploy_dir}/overlays/${sub_dir}
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
