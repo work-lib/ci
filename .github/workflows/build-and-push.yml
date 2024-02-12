@@ -87,7 +87,7 @@ jobs:
           GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
         fi
 
-        if [[ ${{ inputs.AUTOTEST_MODE }} ]]; then
+        if [[ "${{ inputs.AUTOTEST_MODE }}" = true ]]; then
           echo "AUTOTEST_MODE is running"
           GIT_BRANCH="autotest"
           deploy_type="autotest"
