@@ -82,7 +82,7 @@ jobs:
       id: set-tag
       run: |
         if [[ "${{ inputs.IMAGE_TAG }}" ]]; then
-          GIT_TAG=${{ inputs.IMAGE_TAG }}
+          GIT_TAG="${{ inputs.IMAGE_TAG }}"
         else
           GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
         fi
