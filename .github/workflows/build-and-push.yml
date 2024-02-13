@@ -114,8 +114,8 @@ jobs:
           fi
         fi
 
-        if [[ ${{ inputs.MICROSERVICE }} ]]; then
-          MICROSERVICE=${{ inputs.MICROSERVICE }}
+        if [[ "${{ inputs.MICROSERVICE }}" ]]; then
+          MICROSERVICE="${{ inputs.MICROSERVICE }}"
         else
           MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
         fi
