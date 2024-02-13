@@ -61,6 +61,7 @@ on:
 jobs:
   build:
     name: service-workflow
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.set-tag.outputs.branch }}
@@ -83,15 +84,15 @@ jobs:
     - name: Set tag
       id: set-tag
       run: |
-        if [[ ${{ inputs.IMAGE_TAG }} ]]; then
-          GIT_TAG=${{ inputs.IMAGE_TAG }}
+        if [[ "${{ inputs.IMAGE_TAG }}" ]]; then
+          GIT_TAG="${{ inputs.IMAGE_TAG }}"
         else
           #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
           GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
         fi
 
-        if [[ ${{ inputs.AUTOTEST_MODE }} ]]; then
+        if [[ "${{ inputs.AUTOTEST_MODE }}" = true ]]; then
           echo "AUTOTEST_MODE is running"
           GIT_BRANCH="autotest"
           deploy_type="autotest"
