@@ -266,8 +266,6 @@ jobs:
 
        # set the environment variables
        deploy_dir="deploy/k8s_ci"
-       sub_dir="${{ env.environment }}"
-
        cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
@@ -280,8 +278,8 @@ jobs:
        fi
 
        # Deploy api
-       echo "./kubectl apply -k $deploy_dir/overlays/$sub_dir"
-       ./kubectl apply -k ${deploy_dir}/overlays/${sub_dir}
+       echo "./kubectl apply -k $deploy_dir/overlays/${{ env.environment }}"
+       ./kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
@@ -292,10 +290,6 @@ jobs:
             if [ "$(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs job-$MICROSERVICE_SHORT_NAME-migration -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')" = "True" ]; then 
               echo "DB migration failed";  
               exit 1; 
-            # elif [ "$(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs job-$MICROSERVICE_SHORT_NAME-migration -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}')" = "True" ]; then 
-            #  echo "DB migration succeed";  exit 0; 
-            # else  
-            #  echo "Unknown error";  exit 1; 
             fi;
 
        fi
