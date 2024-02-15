@@ -29,6 +29,9 @@ on:
       MICROSERVICE:
         type: string
         required: false    
+      ECR_REPOSITORY:
+        type: string
+        required: false 
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -92,6 +95,13 @@ jobs:
           GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
         fi
 
+        if [[ "${{ inputs.ECR_REPOSITORY }}" ]]; then
+          ECR_REPOSITORY="${{ inputs.ECR_REPOSITORY }}"
+        else
+          ECR_REPOSITORY="gekko/"$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
+        fi
+
+
         if [[ "${{ inputs.AUTOTEST_MODE }}" = true ]]; then
           echo "AUTOTEST_MODE is running"
           GIT_BRANCH="autotest"
@@ -125,7 +135,6 @@ jobs:
         # test if there were changes in DB migrations
         migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
 
-        REPO_NAME="gekko/"$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
@@ -134,14 +143,14 @@ jobs:
         echo "NEEDS_MIGRATION = ${{ inputs.NEEDS_MIGRATION }}"
         echo "deploy_type = ${deploy_type}"
         echo "migrationList = ${migrationList}"
-        echo "REPO_NAME = ${REPO_NAME}"
+        echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
-        echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
+        echo "ECR_REPOSITORY=$ECR_REPOSITORY" >> $GITHUB_OUTPUT
         # for multi-line output
         echo "migration_list<<|" >> $GITHUB_OUTPUT
         echo "$migrationList" >> $GITHUB_OUTPUT
@@ -176,7 +185,7 @@ jobs:
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
               "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
               "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
-              "REPO_NAME": "${{ steps.set-tag.outputs.REPO_NAME }}",
+              "ECR_REPOSITORY": "${{ steps.set-tag.outputs.ECR_REPOSITORY }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "qa",
               "K8S_NAMESPACE":"worklib-qa",
@@ -226,7 +235,7 @@ jobs:
       id: build-image-service
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: ${{ env.REPO_NAME }}
+        ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         DOCKER_BUILDKIT: 1
         WORKLIB_GITHUB_SSH_KEY: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
@@ -256,18 +265,8 @@ jobs:
        aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
 
        # set the environment variables
-       if [ -d "deploy" ]; then
-         deploy_dir="deploy/k8s_ci"
-         sub_dir="${{ env.environment }}"
-       elif [ -d "k8s" ]; then
-         deploy_dir="k8s"
-         sub_dir="${MICROSERVICE}/${{ env.environment }}"
-       else
-         echo "deployment directory is not found";  
-         exit 1; 
-       fi
-        echo "deploy_dir=$deploy_dir"
-        echo "sub_dir=$sub_dir"
+       deploy_dir="deploy/k8s_ci"
+       sub_dir="${{ env.environment }}"
 
        cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
