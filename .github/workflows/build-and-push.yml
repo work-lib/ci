@@ -148,7 +148,7 @@ jobs:
         echo "deploy_type = ${deploy_type}"
         echo "migrationList = ${migrationList}"
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
-        echo "PRODUCTION_BRANCH = ${PRODUCTION_BRANCH}"
+        echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
