@@ -32,6 +32,10 @@ on:
       ECR_REPOSITORY:
         type: string
         required: false 
+      PRODUCTION_BRANCH:
+        type: string
+        required: false 
+        default: "master"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -108,7 +112,7 @@ jobs:
           deploy_type="autotest"
         elif [[ ${GITHUB_REF_TYPE} == 'tag' ]]; then
           echo "Git tag detected"
-          GIT_BRANCH="master"
+          GIT_BRANCH="${{ inputs.PRODUCTION_BRANCH }}"
           # GIT_TAG=${{github.ref_name}}
           deploy_type="docker image build"
         else
@@ -118,8 +122,8 @@ jobs:
           # GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           deploy_type="deployment"
 
-          if [[ $GIT_BRANCH == 'master' ]]; then
-            echo "Workflow run on master branch, aborting."
+          if [[ $GIT_BRANCH == "${{ inputs.PRODUCTION_BRANCH }}" ]]; then
+            echo "Workflow run on ${{ inputs.PRODUCTION_BRANCH }} branch, aborting."
             exit 1
           fi
         fi
@@ -133,7 +137,7 @@ jobs:
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
         # test if there were changes in DB migrations
-        migrationList=$(git diff origin/master HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
+        migrationList=$(git diff origin/${{ inputs.PRODUCTION_BRANCH }} HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
 
 
         echo "GIT_BRANCH: ${GIT_BRANCH}"
@@ -144,6 +148,7 @@ jobs:
         echo "deploy_type = ${deploy_type}"
         echo "migrationList = ${migrationList}"
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
+        echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
@@ -162,7 +167,7 @@ jobs:
         key: "${{ steps.set-tag.outputs.branch }}"
         map: |
           {
-            "master": {
+            "${{ inputs.PRODUCTION_BRANCH }}": {
               "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
               "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
               "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
@@ -259,7 +264,7 @@ jobs:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         MICROSERVICE_SHORT_NAME: ${{ steps.set-tag.outputs.microservice_short_name }}
         MICROSERVICE: ${{ steps.set-tag.outputs.microservice }}
-      if: (steps.set-tag.outputs.branch != 'master')&&(steps.set-tag.outputs.branch != 'main')&&( inputs.NEEDS_DEPLOY == true )
+      if: (steps.set-tag.outputs.branch != "${{ inputs.PRODUCTION_BRANCH }}")&&( inputs.NEEDS_DEPLOY == true )
       run: |
 
        aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
@@ -299,7 +304,7 @@ jobs:
 
   notification:
     needs: build
-    if: always() && (needs.build.outputs.branch !='master') && (needs.build.outputs.branch !='main')
+    if: always() && (needs.build.outputs.branch != "${{ inputs.PRODUCTION_BRANCH }}")
     name: slackNotificationResult
     runs-on: ubuntu-latest
     steps:
@@ -308,7 +313,7 @@ jobs:
         key: "${{ needs.build.outputs.branch }}"
         map: |
           {
-            "master": {
+            "${{ inputs.PRODUCTION_BRANCH }}": {
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
             "staging": {
