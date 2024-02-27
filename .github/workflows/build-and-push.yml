@@ -36,6 +36,10 @@ on:
         type: string
         required: false 
         default: "master"
+      STAGING_BRANCH:
+        type: string
+        required: false 
+        default: "staging"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -149,6 +153,7 @@ jobs:
         echo "migrationList = ${migrationList}"
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
         echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
+        echo "STAGING_BRANCH = ${{ inputs.STAGING_BRANCH }}"        
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
@@ -177,7 +182,7 @@ jobs:
               "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
-            "staging": {
+            "${{ inputs.STAGING_BRANCH }}": {
               "environment": "preprod",
               "K8S_NAMESPACE":"worklib"
             },
@@ -316,7 +321,7 @@ jobs:
             "${{ inputs.PRODUCTION_BRANCH }}": {
               "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
             },
-            "staging": {
+            "${{ inputs.STAGING_BRANCH }}": {
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
             },
             ".*": {
