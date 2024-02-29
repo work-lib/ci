@@ -240,9 +240,7 @@ jobs:
 
         echo ${{ steps.set-tag.outputs.branch }} 
         echo "${{ inputs.PRODUCTION_BRANCH }}"
-        echo ("${{ steps.set-tag.outputs.branch }}" != "${{ inputs.PRODUCTION_BRANCH }}")&&( inputs.NEEDS_DEPLOY == true )
         if [[ ("${{ steps.set-tag.outputs.branch }}" != "${{ inputs.PRODUCTION_BRANCH }}")&&( inputs.NEEDS_DEPLOY == true) ]]; then echo "deploy goes"; else echo "deploy skipped"; fi
-        if [[ (${{ steps.set-tag.outputs.branch }} != "${{ inputs.PRODUCTION_BRANCH }}")&&( inputs.NEEDS_DEPLOY == true) ]]; then echo "deploy goes"; else echo "deploy skipped"; fi
         exit 1
 
   notification:
