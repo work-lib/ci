@@ -98,9 +98,10 @@ jobs:
         if [[ "${{ inputs.IMAGE_TAG }}" ]]; then
           GIT_TAG="${{ inputs.IMAGE_TAG }}"
         else
-          #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
-          #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
+          ##GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          ##convert "prefix/branch" into "prefix-branch" so the docker tag is valid
+          #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
+          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
         fi
 
         if [[ "${{ inputs.ECR_REPOSITORY }}" ]]; then
