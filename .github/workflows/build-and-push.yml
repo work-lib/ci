@@ -271,6 +271,10 @@ jobs:
         MICROSERVICE: ${{ steps.set-tag.outputs.microservice }}
       if: (steps.set-tag.outputs.branch != inputs.PRODUCTION_BRANCH )&&( inputs.NEEDS_DEPLOY == true )
       run: |
+       if [[ ("${{ env.EKS_CLUSTER_NAME }}" == "gek-prd")||("${{ env.environment }}" == "production") ]]; then
+          echo "Workflow run on ${{ inputs.PRODUCTION_BRANCH }} branch, aborting."
+          exit 1
+       fi
 
        aws eks update-kubeconfig --name=${{ env.EKS_CLUSTER_NAME }}
 
