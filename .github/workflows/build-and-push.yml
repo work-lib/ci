@@ -100,7 +100,7 @@ jobs:
         else
           #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
+          GIT_TAG=$(echo ${${GITHUB_REF#refs/heads/}#refs/tags/} | tr / -) 
         fi
 
         if [[ "${{ inputs.ECR_REPOSITORY }}" ]]; then
