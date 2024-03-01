@@ -101,7 +101,7 @@ jobs:
           #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
           # take GITHUB_REF which can be refs/heads/<branch_name>, refs/pull/<pr_number>/merge, refs/tags/<tag_name>
           # and get the <branch_name> or <tag_name>
-          if [[ $GITHUB_REF =~ /([^/]*/){2}(.*) ]]; then
+          if [[ $GITHUB_REF =~ /([^/]*/){1}(.*) ]]; then
               GIT_TAG=${BASH_REMATCH[2]}
           else
               GIT_TAG=$GITHUB_REF
@@ -151,6 +151,7 @@ jobs:
         migrationList=$(git diff origin/${{ inputs.PRODUCTION_BRANCH }} HEAD --name-only --diff-filter=d | grep migrations/ | awk '{printf "%s\\n", $0}')
 
 
+        echo "GITHUB_REF: ${GITHUB_REF}"
         echo "GIT_BRANCH: ${GIT_BRANCH}"
         echo "GIT_TAG: ${GIT_TAG}"
         echo "MICROSERVICE = ${MICROSERVICE}"
