@@ -98,10 +98,16 @@ jobs:
         if [[ "${{ inputs.IMAGE_TAG }}" ]]; then
           GIT_TAG="${{ inputs.IMAGE_TAG }}"
         else
-          ##GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
-          ##convert "prefix/branch" into "prefix-branch" so the docker tag is valid
-          #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
-          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          #GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          # take GITHUB_REF which can be refs/heads/<branch_name>, refs/pull/<pr_number>/merge, refs/tags/<tag_name>
+          # and get the <branch_name> or <tag_name>
+          if [[ $GITHUB_REF =~ /([^/]*/){2}(.*) ]]; then
+              GIT_TAG=${BASH_REMATCH[2]}
+          else
+              GIT_TAG=$GITHUB_REF
+          fi
+          #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
+          GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | tr / -) 
         fi
 
         if [[ "${{ inputs.ECR_REPOSITORY }}" ]]; then
