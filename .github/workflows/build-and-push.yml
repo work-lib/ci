@@ -192,7 +192,7 @@ jobs:
             },
             "${{ inputs.STAGING_BRANCH }}": {
               "environment": "preprod",
-              "K8S_NAMESPACE":"worklib"
+              "K8S_NAMESPACE":"worklib",
               "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
             },
             "autotest": {
