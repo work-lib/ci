@@ -43,31 +43,43 @@ on:
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
+        default: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
 # QA and preprod
       AWS_ACCESS_KEY_ID_DEV:
         required: true
+        default: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
       AWS_SECRET_ACCESS_KEY_DEV:
         required: true
+        default: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
       AWS_ROLE_EXTERNAL_ID_DEV:
         required: true
+        default: ${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}
       AWS_ROLE_TO_ASSUME_DEV:
         required: true
+        default: ${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}
       QA_SLACK_WEBHOOK_URL:
         required: true
+        default: ${{ secrets.QA_SLACK_WEBHOOK_URL }}
 # preprod
       PPD_SLACK_WEBHOOK_URL:
         required: true
+        default: ${{ secrets.PPD_SLACK_WEBHOOK_URL }}
 # prod
       AWS_ACCESS_KEY_ID_PROD:
         required: true
+        default: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
       AWS_SECRET_ACCESS_KEY_PROD:
         required: true
+        default: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
       AWS_ROLE_EXTERNAL_ID_PROD:
         required: true
+        default: ${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}
       AWS_ROLE_TO_ASSUME_PROD:
         required: true
+        default: ${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}
       PRD_SLACK_WEBHOOK_URL:
         required: true
+        default: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
 
 jobs:
   build:
