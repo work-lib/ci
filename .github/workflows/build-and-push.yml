@@ -40,6 +40,10 @@ on:
         type: string
         required: false 
         default: "staging"
+      APP_TYPE:
+        type: string
+        required: false
+        description: "Type of application to build (web-app or host-app). If not specified, uses Dockerfile_k8s for backward compatibility"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -161,7 +165,19 @@ jobs:
         echo "migrationList = ${migrationList}"
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
         echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
-        echo "STAGING_BRANCH = ${{ inputs.STAGING_BRANCH }}"        
+        echo "STAGING_BRANCH = ${{ inputs.STAGING_BRANCH }}"
+        echo "APP_TYPE = ${{ inputs.APP_TYPE }}"
+        
+        # Determine Dockerfile based on APP_TYPE
+        if [[ "${{ inputs.APP_TYPE }}" == "host-app" ]]; then
+          DOCKERFILE="DockerfileHostApp"
+        elif [[ "${{ inputs.APP_TYPE }}" == "web-app" ]]; then
+          DOCKERFILE="DockerfileWebApp"
+        else
+          # Default for other services (backward compatibility)
+          DOCKERFILE="Dockerfile_k8s"
+        fi
+        echo "DOCKERFILE = ${DOCKERFILE}"
         
         echo "branch=$GIT_BRANCH" >> $GITHUB_OUTPUT
         echo "tag=$GIT_TAG" >> $GITHUB_OUTPUT
@@ -169,6 +185,7 @@ jobs:
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT
         echo "ECR_REPOSITORY=$ECR_REPOSITORY" >> $GITHUB_OUTPUT
+        echo "dockerfile=$DOCKERFILE" >> $GITHUB_OUTPUT
         # for multi-line output
         echo "migration_list<<|" >> $GITHUB_OUTPUT
         echo "$migrationList" >> $GITHUB_OUTPUT
@@ -262,11 +279,11 @@ jobs:
       run: |
        # apply ssh key if it is passed and needed for docker build
        if [ -z "$WORKLIB_GITHUB_SSH_KEY" ]; then
-            docker build --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+            docker build --pull -f ./${{ steps.set-tag.outputs.dockerfile }} -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         else
             echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
             # Build a docker container and push it to ECR
-            docker build --ssh ssh_key=/tmp/ssh.key --pull -f ./Dockerfile_k8s -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+            docker build --ssh ssh_key=/tmp/ssh.key --pull -f ./${{ steps.set-tag.outputs.dockerfile }} -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         fi
         
         echo "Pushing image to ECR...$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
