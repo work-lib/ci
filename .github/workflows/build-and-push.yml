@@ -311,6 +311,7 @@ jobs:
          deploy_dir="$deploy_dir/$MICROSERVICE"
        fi
        cd $deploy_dir
+       chmod +x ./replace_parameters.sh
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
        
