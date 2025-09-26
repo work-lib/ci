@@ -40,10 +40,6 @@ on:
         type: string
         required: false 
         default: "staging"
-      APP_TYPE:
-        type: string
-        required: false
-        description: "Type of application to build (web-app or host-app). If not specified, uses Dockerfile_k8s for backward compatibility"
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -112,6 +108,11 @@ jobs:
           fi
           #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
           GIT_TAG=$(echo $GIT_TAG | tr / -) 
+          
+          # Add microservice suffix for web-app and host-app
+          if [[ "${{ inputs.MICROSERVICE }}" == "web-app" ]] || [[ "${{ inputs.MICROSERVICE }}" == "host-app" ]]; then
+            GIT_TAG="${GIT_TAG}-${{ inputs.MICROSERVICE }}"
+          fi 
         fi
 
         if [[ "${{ inputs.ECR_REPOSITORY }}" ]]; then
@@ -166,12 +167,12 @@ jobs:
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
         echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
         echo "STAGING_BRANCH = ${{ inputs.STAGING_BRANCH }}"
-        echo "APP_TYPE = ${{ inputs.APP_TYPE }}"
+        echo "MICROSERVICE = ${{ inputs.MICROSERVICE }}"
         
-        # Determine Dockerfile based on APP_TYPE
-        if [[ "${{ inputs.APP_TYPE }}" == "host-app" ]]; then
+        # Determine Dockerfile based on MICROSERVICE
+        if [[ "${{ inputs.MICROSERVICE }}" == "host-app" ]]; then
           DOCKERFILE="DockerfileHostApp"
-        elif [[ "${{ inputs.APP_TYPE }}" == "web-app" ]]; then
+        elif [[ "${{ inputs.MICROSERVICE }}" == "web-app" ]]; then
           DOCKERFILE="DockerfileWebApp"
         else
           # Default for other services (backward compatibility)
@@ -306,6 +307,9 @@ jobs:
 
        # set the environment variables
        deploy_dir="deploy/k8s_ci"
+       if [ "$MICROSERVICE" = "host-app" ] || [ "$MICROSERVICE" = "web-app" ]; then
+         deploy_dir="$deploy_dir/$MICROSERVICE"
+       fi
        cd $deploy_dir
        ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
        cd -
