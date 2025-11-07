@@ -275,7 +275,7 @@ jobs:
         ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         DOCKER_BUILDKIT: 1
-        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
+        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY }}
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: |
        # apply ssh key if it is passed and needed for docker build
