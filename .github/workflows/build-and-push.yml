@@ -324,7 +324,15 @@ jobs:
 
        # Deploy api
        echo "./kubectl apply -k $deploy_dir/overlays/${{ env.environment }}"
-       ./kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
+       APPLY_OUTPUT=$(./kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }} 2>&1)
+       echo "$APPLY_OUTPUT"
+       
+       # Extract deployment name from kubectl apply output (handles cases where deployment name differs from microservice name)
+       DEPLOYMENT_NAME=$(echo "$APPLY_OUTPUT" | grep -oE 'deployment\.apps/[^ ]+' | head -1 | cut -d'/' -f2 || echo "$MICROSERVICE")
+       if [ -z "$DEPLOYMENT_NAME" ] || [ "$DEPLOYMENT_NAME" = "$MICROSERVICE" ]; then
+         # Fallback: try to get deployment name from Kubernetes
+         DEPLOYMENT_NAME=$(./kubectl get deployments -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.items[?(@.metadata.labels.app)].metadata.name}' 2>/dev/null | head -1 || echo "$MICROSERVICE")
+       fi
 
        if ${{ inputs.NEEDS_MIGRATION }}; then
            # output migration logs
@@ -340,7 +348,8 @@ jobs:
        fi
 
        # output deployment status
-       ./kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
+       echo "Checking rollout status for deployment: $DEPLOYMENT_NAME"
+       ./kubectl rollout status deployment $DEPLOYMENT_NAME -n ${{ env.K8S_NAMESPACE }}
 
   notification:
     needs: build
