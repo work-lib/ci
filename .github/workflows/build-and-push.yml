@@ -95,6 +95,12 @@ jobs:
     - name: Set tag
       id: set-tag
       run: |
+        if [[ "${{ inputs.MICROSERVICE }}" ]]; then
+          MICROSERVICE="${{ inputs.MICROSERVICE }}"
+        else
+          MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
+        fi
+
         if [[ "${{ inputs.IMAGE_TAG }}" ]]; then
           GIT_TAG="${{ inputs.IMAGE_TAG }}"
         else
@@ -109,8 +115,8 @@ jobs:
           #convert "prefix/branch" into "prefix-branch" so the docker tag is valid
           GIT_TAG=$(echo $GIT_TAG | tr / -) 
           
-          # Add microservice suffix for web-app and host-app
-          if [[ "${{ inputs.MICROSERVICE }}" == "web-app" ]] || [[ "${{ inputs.MICROSERVICE }}" == "host-app" ]]; then
+          # Add microservice suffix for frontend apps (not starting with "service-")
+          if [[ ! "${{ inputs.MICROSERVICE }}" =~ ^service- ]]; then
             GIT_TAG="${GIT_TAG}-${{ inputs.MICROSERVICE }}"
           fi 
         fi
@@ -144,11 +150,6 @@ jobs:
           fi
         fi
 
-        if [[ "${{ inputs.MICROSERVICE }}" ]]; then
-          MICROSERVICE="${{ inputs.MICROSERVICE }}"
-        else
-          MICROSERVICE=$(echo ${GITHUB_REPOSITORY} | awk -F'/' '{ print $NF}')
-        fi
 
         MICROSERVICE_SHORT_NAME=$(echo ${MICROSERVICE} | awk -F'service-' '{ print $NF}')
 
@@ -170,12 +171,10 @@ jobs:
         echo "MICROSERVICE = ${{ inputs.MICROSERVICE }}"
         
         # Determine Dockerfile based on MICROSERVICE
-        if [[ "${{ inputs.MICROSERVICE }}" == "host-app" ]]; then
-          DOCKERFILE="DockerfileHostApp"
-        elif [[ "${{ inputs.MICROSERVICE }}" == "web-app" ]]; then
-          DOCKERFILE="DockerfileWebApp"
+        if [[ ! "${{ inputs.MICROSERVICE }}" =~ ^service- ]]; then
+          DOCKERFILE="${{ inputs.MICROSERVICE }}.dockerfile"
         else
-          # Default for other services (backward compatibility)
+          # Default for backend services (backward compatibility)
           DOCKERFILE="Dockerfile_k8s"
         fi
         echo "DOCKERFILE = ${DOCKERFILE}"
@@ -307,7 +306,8 @@ jobs:
 
        # set the environment variables
        deploy_dir="deploy/k8s_ci"
-       if [ "$MICROSERVICE" = "host-app" ] || [ "$MICROSERVICE" = "web-app" ]; then
+       # Frontend apps (not starting with "service-") have their own deploy directory
+       if [[ ! "$MICROSERVICE" =~ ^service- ]]; then
          deploy_dir="$deploy_dir/$MICROSERVICE"
        fi
        cd $deploy_dir
