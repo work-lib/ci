@@ -168,11 +168,10 @@ jobs:
         echo "ECR_REPOSITORY = ${ECR_REPOSITORY}"
         echo "PRODUCTION_BRANCH = ${{ inputs.PRODUCTION_BRANCH }}"
         echo "STAGING_BRANCH = ${{ inputs.STAGING_BRANCH }}"
-        echo "MICROSERVICE = ${{ inputs.MICROSERVICE }}"
         
         # Determine Dockerfile based on MICROSERVICE
-        if [[ ! "${{ inputs.MICROSERVICE }}" =~ ^service- ]]; then
-          DOCKERFILE="${{ inputs.MICROSERVICE }}.dockerfile"
+        if [[ ! "${MICROSERVICE}" =~ ^service- ]]; then
+          DOCKERFILE="${MICROSERVICE}.dockerfile"
         else
           # Default for backend services (backward compatibility)
           DOCKERFILE="Dockerfile_k8s"
