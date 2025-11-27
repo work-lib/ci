@@ -116,8 +116,8 @@ jobs:
           GIT_TAG=$(echo $GIT_TAG | tr / -) 
           
           # Add microservice suffix for frontend apps (not starting with "service-")
-          if [[ ! "${{ inputs.MICROSERVICE }}" =~ ^service- ]]; then
-            GIT_TAG="${GIT_TAG}-${{ inputs.MICROSERVICE }}"
+          if [[ ! "${MICROSERVICE}" =~ ^service- ]]; then
+            GIT_TAG="${GIT_TAG}-${MICROSERVICE}"
           fi 
         fi
 
