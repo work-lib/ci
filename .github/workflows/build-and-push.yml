@@ -284,6 +284,10 @@ jobs:
         ls -l $SSH_AUTH_SOCK
         ssh-add -l
 
+    - name: Write NOTION_ACCESS_TOKEN secret to file
+      run: |
+        echo "${{ secrets.NOTION_ACCESS_TOKEN }}" > notion_token.txt
+
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
       uses: docker/build-push-action@v5
@@ -308,7 +312,7 @@ jobs:
 
         # Secrets utilisés dans le Dockerfile
         secrets: |
-          id=notion_access_token,env=NOTION_ACCESS_TOKEN
+          id=notion_access_token,src=notion_token.txt
         ssh: ${{ env.HAS_SSH_KEY == 'true' && 'default' || '' }}
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
