@@ -279,14 +279,14 @@ jobs:
 
     - name: Write NOTION_ACCESS_TOKEN secret to file
       run: |
-        echo -n "${{ secrets.NOTION_ACCESS_TOKEN }}" > notion_token.txt
+        echo -n "${{ secrets.NOTION_ACCESS_TOKEN }}" > ./notion_token.txt
 
     - name: Debug notion_token.txt
       run: |
-        echo "File exists: $(test -f notion_token.txt && echo yes || echo no)"
-        echo "File size: $(stat -c%s notion_token.txt) bytes"
-        echo "File content: $(cat notion_token.txt)"
-        echo "File content length: $(wc -c < notion_token.txt) characters"
+        echo "File exists: $(test -f ./notion_token.txt && echo yes || echo no)"
+        echo "File size: $(stat -c%s ./notion_token.txt) bytes"
+        echo "File content: $(cat ./notion_token.txt)"
+        echo "File content length: $(wc -c < ./notion_token.txt) characters"
 
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
@@ -312,7 +312,7 @@ jobs:
 
         # Secrets utilisés dans le Dockerfile
         secrets: |
-          id=notion_access_token,src=notion_token.txt
+          id=notion_access_token,src=./notion_token.txt
         ssh: ${{ env.HAS_SSH_KEY == 'true' && 'default' || '' }}
 
     - name: Set image output
