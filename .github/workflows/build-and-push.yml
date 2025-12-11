@@ -301,10 +301,6 @@ jobs:
         secrets: |
           id=notion_access_token,env=NOTION_ACCESS_TOKEN
 
-        # SSH agent (si la clé existe)
-        ssh: |
-          ssh_key=/tmp/ssh.key
-
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
