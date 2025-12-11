@@ -83,7 +83,6 @@ jobs:
       migration_list: ${{ steps.set-tag.outputs.migration_list }}
     env:
       HAS_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY != '' }} 
-      AWS_ENV: ${{ needs.build.outputs.branch == inputs.PRODUCTION_BRANCH && 'PROD' || 'DEV' }}
 
     steps:
 
@@ -200,6 +199,10 @@ jobs:
         map: |
           {
             "${{ inputs.PRODUCTION_BRANCH }}": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}",
               "EKS_CLUSTER_NAME": "gek-prd",
               "environment": "production",
               "K8S_NAMESPACE":"worklib",
@@ -215,6 +218,10 @@ jobs:
               "K8S_NAMESPACE":"autotest"
             },
             ".*": {
+              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
+              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
+              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
+              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
               "ECR_REPOSITORY": "${{ steps.set-tag.outputs.ECR_REPOSITORY }}",
               "EKS_CLUSTER_NAME": "gek-ppd",
               "environment": "qa",
@@ -245,25 +252,13 @@ jobs:
         SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
         SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
-    - name: Debug secrets presence
-      run: |
-        echo "AWS_ENV: ${{ env.AWS_ENV }}"
-        echo "ACCESS KEY: ${{ secrets[format('AWS_ACCESS_KEY_ID_%s', env.AWS_ENV)] }}"
-        echo "ACCESS KEY: ${{ secrets['AWS_ACCESS_KEY_ID_DEV'] }}"
-        echo "SECRET KEY: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_%s', env.AWS_ENV)] }}"
-        echo "SECRET KEY: ${{ secrets['AWS_SECRET_ACCESS_KEY_DEV'] }}"
-        echo "ROLE ID: ${{ secrets[format('AWS_ROLE_EXTERNAL_ID_%s', env.AWS_ENV)] }}"
-        echo "ROLE ID: ${{ secrets['AWS_ROLE_EXTERNAL_ID_DEV'] }}"
-        echo "ROLE ASSUME: ${{ secrets[format('AWS_ROLE_TO_ASSUME_%s', env.AWS_ENV)] }}"
-        echo "ROLE ASSUME: ${{ secrets['AWS_ROLE_TO_ASSUME_DEV'] }}"
-
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
       with:
-        aws-access-key-id: ${{ secrets[format('AWS_ACCESS_KEY_ID_%s', env.AWS_ENV)] }}
-        aws-secret-access-key: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_%s', env.AWS_ENV)] }}
-        role-external-id: ${{ secrets[format('AWS_ROLE_EXTERNAL_ID_%s', env.AWS_ENV)] }}
-        role-to-assume: ${{ secrets[format('AWS_ROLE_TO_ASSUME_%s', env.AWS_ENV)] }}
+        aws-access-key-id: ${{env.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key:  ${{env.AWS_SECRET_ACCESS_KEY }}
+        role-external-id: ${{ env.AWS_ROLE_EXTERNAL_ID }}
+        role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
         role-duration-seconds: 1200
         role-skip-session-tagging: true
         aws-region: eu-west-1
