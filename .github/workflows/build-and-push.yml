@@ -274,9 +274,8 @@ jobs:
         WORKLIB_GITHUB_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY }}
       if: ${{ env.WORKLIB_GITHUB_SSH_KEY != '' }}
       run: |
-        echo "${{ env.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
-        chmod 600 /tmp/ssh.key
-        echo "SSH_PATH=/tmp/ssh.key" >> $GITHUB_ENV
+        eval "$(ssh-agent -s)"
+        ssh-add <(echo "${WORKLIB_GITHUB_SSH_KEY}")
 
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
@@ -287,6 +286,7 @@ jobs:
         ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         NOTION_ACCESS_TOKEN: ${{ secrets.NOTION_ACCESS_TOKEN }}
+        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY }}
       with:
         context: .
         file: ./${{ steps.set-tag.outputs.dockerfile }}
@@ -302,7 +302,7 @@ jobs:
         # Secrets utilisés dans le Dockerfile
         secrets: |
           id=notion_access_token,env=NOTION_ACCESS_TOKEN
-        ssh: ${{ env.SSH_PATH || '' }}
+        ssh: ${{ env.WORKLIB_GITHUB_SSH_KEY != '' && 'default' || '' }}
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
