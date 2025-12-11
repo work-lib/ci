@@ -274,7 +274,15 @@ jobs:
       if: ${{ env.HAS_SSH_KEY == 'true' }}
       run: |
         eval "$(ssh-agent -s)"
-        echo "${{ secrets.BL_GITHUB_SSH_KEY }}" | ssh-add -
+        echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
+        echo "${{ secrets.BL_GITHUB_SSH_KEY }}" | tr -d '\r' | ssh-add -
+
+    - name: Debug SSH
+      if: ${{ env.HAS_SSH_KEY == 'true' }}
+      run: |
+        echo "SSH_AUTH_SOCK = $SSH_AUTH_SOCK"
+        ls -l $SSH_AUTH_SOCK
+        ssh-add -l
 
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
