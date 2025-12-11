@@ -245,6 +245,17 @@ jobs:
         SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
         SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
+    - name: Debug secrets presence
+      run: |
+        echo "AWS_ENV: ${{ env.AWS_ENV }}"
+        echo "ACCESS KEY: ${{ secrets[format('AWS_ACCESS_KEY_ID_%s', env.AWS_ENV)] }}"
+        echo "ACCESS KEY: ${{ secrets['AWS_ACCESS_KEY_ID_DEV'] }}"
+        echo "SECRET KEY: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_%s', env.AWS_ENV)] }}"
+        echo "SECRET KEY: ${{ secrets['AWS_SECRET_ACCESS_KEY_DEV'] }}"
+        echo "ROLE ID: ${{ secrets[format('AWS_ROLE_EXTERNAL_ID_%s', env.AWS_ENV)] }}"
+        echo "ROLE ID: ${{ secrets['AWS_ROLE_EXTERNAL_ID_DEV'] }}"
+        echo "ROLE ASSUME: ${{ secrets[format('AWS_ROLE_TO_ASSUME_%s', env.AWS_ENV)] }}"
+        echo "ROLE ASSUME: ${{ secrets['AWS_ROLE_TO_ASSUME_DEV'] }}"
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
