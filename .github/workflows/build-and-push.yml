@@ -41,7 +41,7 @@ on:
         required: false 
         default: "staging"
     secrets:
-      WORKLIB_GITHUB_SSH_KEY:
+      BL_GITHUB_SSH_KEY:
         required: true
 # QA and preprod
       AWS_ACCESS_KEY_ID_DEV:
@@ -299,8 +299,7 @@ jobs:
         # Secrets utilisés dans le Dockerfile
         secrets: |
           id=notion_access_token,env=NOTION_ACCESS_TOKEN
-        ssh: ${{ secrets.BL_GITHUB_SSH_KEY != '' && '/tmp/ssh.key' || '' }}
-
+        ssh: ${{ secrets.BL_GITHUB_SSH_KEY != '' ? '/tmp/ssh.key' : '' }}
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
