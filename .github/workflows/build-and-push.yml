@@ -279,12 +279,6 @@ jobs:
         echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
         echo "${{ secrets.BL_GITHUB_SSH_KEY }}" | tr -d '\r' | ssh-add -
 
-    - name: Write NOTION_ACCESS_TOKEN secret to file
-      if: ( inputs.NEEDS_IMAGE_BUILD == true )
-      run: |
-        echo -n "${{ secrets.NOTION_ACCESS_TOKEN }}" > notion_token.txt
-        echo "Secret file created, size: $(stat -c%s notion_token.txt) bytes"
-
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
       uses: docker/build-push-action@v5
@@ -309,7 +303,7 @@ jobs:
 
         # Secrets utilisés dans le Dockerfile
         secrets: |
-          id=notion_access_token,src=notion_token.txt
+          notion_access_token=${{ secrets.NOTION_ACCESS_TOKEN }}
         ssh: ${{ env.HAS_SSH_KEY == 'true' && 'default' || '' }}
 
     - name: Set image output
