@@ -302,6 +302,11 @@ jobs:
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
 
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: '1.22.6'
+
     - name: Deploy to EKS Cluster (preprod only)
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
@@ -330,11 +335,11 @@ jobs:
         # deploy migration function :
         deploy_migration() {
             job="job-$MICROSERVICE_SHORT_NAME-migration"
-            ./kubectl delete job $job -n ${{ env.K8S_NAMESPACE }} || echo "$job does not exist"
-            ./kubectl wait --for=condition=complete job/$job --timeout=150s -n ${{ env.K8S_NAMESPACE }} || echo "Timeout error. DB migrations did not fit the timout of 150 sec. It does NOT mean that the deployment is failed, please check the PODs statuses manually"
-            ./kubectl logs job/$job -n ${{ env.K8S_NAMESPACE }}
+            kubectl delete job $job -n ${{ env.K8S_NAMESPACE }} || echo "$job does not exist"
+            kubectl wait --for=condition=complete job/$job --timeout=150s -n ${{ env.K8S_NAMESPACE }} || echo "Timeout error. DB migrations did not fit the timout of 150 sec. It does NOT mean that the deployment is failed, please check the PODs statuses manually"
+            kubectl logs job/$job -n ${{ env.K8S_NAMESPACE }}
             echo "check DB migration status";
-            if [[ $(./kubectl -n ${{ env.K8S_NAMESPACE }} get jobs $job -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}') == "True" ]]; then
+            if [[ $(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs $job -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}') == "True" ]]; then
               echo "DB migration failed"
               exit 1
             fi
@@ -344,9 +349,9 @@ jobs:
         ${{ inputs.NEEDS_MIGRATION }} && deploy_migration
 
         # Deploy manifest
-        echo "./kubectl apply -k $deploy_dir/overlays/${{ env.environment }}"
-        ./kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
-        ./kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
+        echo "kubectl apply -k $deploy_dir/overlays/${{ env.environment }}"
+        kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
+        kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
 
   notification:
     needs: build
