@@ -277,16 +277,13 @@ jobs:
         echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
         echo "${{ secrets.BL_GITHUB_SSH_KEY }}" | tr -d '\r' | ssh-add -
 
-    - name: Debug SSH
-      if: ${{ env.HAS_SSH_KEY == 'true' }}
-      run: |
-        echo "SSH_AUTH_SOCK = $SSH_AUTH_SOCK"
-        ls -l $SSH_AUTH_SOCK
-        ssh-add -l
-
     - name: Write NOTION_ACCESS_TOKEN secret to file
       run: |
-        echo "${{ secrets.NOTION_ACCESS_TOKEN }}" > notion_token.txt
+        echo -n "${{ secrets.NOTION_ACCESS_TOKEN }}" > notion_token.txt
+
+    - name: Debug notion_token.txt
+      run: |
+        cat -A notion_token.txt
 
     - name: Build, tag and push image using Buildx with cache
       id: build-image-service
