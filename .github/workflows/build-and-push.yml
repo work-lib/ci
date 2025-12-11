@@ -270,9 +270,11 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Prepare SSH key (optional)
-      if: ${{ secrets.BL_GITHUB_SSH_KEY != '' }}
+      env:
+        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY }}
+      if: ${{ env.WORKLIB_GITHUB_SSH_KEY != '' }}
       run: |
-        echo "${{ secrets.BL_GITHUB_SSH_KEY }}" > /tmp/ssh.key
+        echo "${{ env.WORKLIB_GITHUB_SSH_KEY }}" > /tmp/ssh.key
         chmod 600 /tmp/ssh.key
         echo "SSH_PATH=/tmp/ssh.key" >> $GITHUB_ENV
 
