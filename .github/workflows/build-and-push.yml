@@ -270,9 +270,9 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Prepare SSH key (optional)
-      if: env.WORKLIB_GITHUB_SSH_KEY != ''
+      if: ${{ secrets.BL_GITHUB_SSH_KEY != '' }}
       run: |
-        echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
+        echo "${{ secrets.BL_GITHUB_SSH_KEY }}" > /tmp/ssh.key
         chmod 600 /tmp/ssh.key
 
     - name: Build, tag and push image using Buildx with cache
@@ -284,7 +284,6 @@ jobs:
         ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
         NOTION_ACCESS_TOKEN: ${{ secrets.NOTION_ACCESS_TOKEN }}
-        WORKLIB_GITHUB_SSH_KEY: ${{ secrets.BL_GITHUB_SSH_KEY }}
       with:
         context: .
         file: ./${{ steps.set-tag.outputs.dockerfile }}
@@ -300,10 +299,12 @@ jobs:
         # Secrets utilisés dans le Dockerfile
         secrets: |
           id=notion_access_token,env=NOTION_ACCESS_TOKEN
-        ssh: ${{ secrets.WORKLIB_GITHUB_SSH_KEY && format('ssh_key=%s', secrets.WORKLIB_GITHUB_SSH_KEY) || '' }}
+        ssh: ${{ secrets.BL_GITHUB_SSH_KEY != '' && '/tmp/ssh.key' || '' }}
+
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
+
     - name: Deploy to EKS Cluster (preprod only)
       env:
         IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
