@@ -296,6 +296,10 @@ jobs:
         secrets: |
           notion_access_token=${{ secrets.NOTION_ACCESS_TOKEN }}
         ssh: ${{ env.HAS_SSH_KEY == 'true' && 'default' || '' }}
+        
+        # Build args to force some task skipped by cache
+        build-args: |
+          BUILD_DATE=${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Set image output
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
