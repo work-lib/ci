@@ -290,7 +290,7 @@ jobs:
 
         # Cache BuildKit (pnpm + layers)
         cache-from: type=gha,scope=${{ steps.set-tag.outputs.microservice_short_name }}
-        cache-to: type=gha,mode=max,scope=${{ steps.set-tag.outputs.microservice_short_name }}
+        cache-to: type=gha,mode=min,scope=${{ steps.set-tag.outputs.microservice_short_name }}
 
         # Secrets used in Dockerfile
         secrets: |
