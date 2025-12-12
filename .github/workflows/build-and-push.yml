@@ -303,9 +303,9 @@ jobs:
 
     - name: Install kubectl (Amazon EKS)
       run: |
-        curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.0/2024-11-26/bin/linux/amd64/kubectl"
+        curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-06-20/bin/linux/amd64/kubectl"
         chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/
+        sudo mv kubectl /usr/local/bin/kubectl
 
     - name: Deploy to EKS Cluster (preprod only)
       env:
