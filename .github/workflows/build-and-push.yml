@@ -301,11 +301,12 @@ jobs:
       if: ( inputs.NEEDS_IMAGE_BUILD == true )
       run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}" >> $GITHUB_OUTPUT
 
-    - name: Install kubectl (Amazon EKS)
+    - name: Install kubectl
       run: |
-        curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-06-20/bin/linux/amd64/kubectl"
+        curl -LO "https://dl.k8s.io/release/v1.30.13/bin/linux/amd64/kubectl"
         chmod +x kubectl
         sudo mv kubectl /usr/local/bin/kubectl
+        kubectl version --client --short
 
     - name: Deploy to EKS Cluster (preprod only)
       env:
