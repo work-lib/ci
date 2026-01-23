@@ -143,7 +143,10 @@ jobs:
         else
           echo "Git branch detected"
           # If branch name is feature/myfeature, only extract "myfeature"
-          GIT_BRANCH=$(basename "$GITHUB_REF")
+          # GIT_BRANCH=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+          # GIT_TAG=$(echo ${GITHUB_REF#refs/heads/} | awk -F'/' '{ print $NF}')
+        
+          GIT_BRANCH="$GITHUB_REF_NAME"
           deploy_type="deployment"
 
           if [[ $GIT_BRANCH == "${{ inputs.PRODUCTION_BRANCH }}" ]]; then
