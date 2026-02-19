@@ -1,0 +1,16 @@
+# Filtres pour dorny/paths-filter
+# Utilisé pour détecter les changements dans un monorepo (apps/ et packages/)
+#
+# Si un package est modifié → toutes les apps doivent être buildées (géré dans le workflow)
+# Si une app est modifiée → seule cette app est buildée (sauf si packages aussi modifiés)
+
+host-app:
+  - 'apps/host-app/**'
+web-app:
+  - 'apps/web-app/**'
+landing-page:
+  - 'apps/landing-page/**'
+storybook:
+  - 'apps/storybook/**'
+packages:
+  - 'packages/**'
