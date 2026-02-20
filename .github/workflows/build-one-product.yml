@@ -222,8 +222,18 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
+      - name: Check SSH key availability
+        id: ssh-check
+        if: inputs.NEEDS_IMAGE_BUILD == true
+        run: |
+          if [[ -n "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" ]]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup SSH agent
-        if: inputs.NEEDS_IMAGE_BUILD == true && secrets.WORKLIB_GITHUB_SSH_KEY != ''
+        if: inputs.NEEDS_IMAGE_BUILD == true && steps.ssh-check.outputs.available == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
