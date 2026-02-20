@@ -86,51 +86,56 @@ jobs:
         echo "microservice=$MICROSERVICE" >> $GITHUB_OUTPUT
         echo "microservice_short_name=$MICROSERVICE_SHORT_NAME" >> $GITHUB_OUTPUT
         echo "deploy_type=$deploy_type" >> $GITHUB_OUTPUT        
-    - uses: kanga333/variable-mapper@master
-      with:
-        key: "${{ inputs.TARGET_ENV }}"
-        map: |
-          {
-            "production": {
-              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
-              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
-              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
-              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}",
-              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
-              "EKS_CLUSTER_NAME": "gek-prd",
-              "environment": "production",
-              "NODE_ENV": "production",
-              "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}",
-              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-prd01"
-            },
-            "preprod": {
-              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
-              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
-              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
-              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
-              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
-              "EKS_CLUSTER_NAME": "gek-ppd",
-              "environment": "preprod",
-              "NODE_ENV": "staging-aws",
-              "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}",
-              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
-            },
-            ".*": {
-              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
-              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
-              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
-              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
-              "REPO_NAME": "gekko/${{ steps.set-tag.outputs.microservice }}",
-              "EKS_CLUSTER_NAME": "gek-ppd",
-              "environment": "qa",
-              "NODE_ENV": "qa",
-              "K8S_NAMESPACE":"worklib-qa",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}",
-              "DB-INSTANCE-IDENTIFIER" : "rds-pgsql-ppd"
-            }
-          }
+    - name: Map environment config
+      run: |
+        REPO_NAME="gekko/${{ steps.set-tag.outputs.microservice }}"
+        case "${{ inputs.TARGET_ENV }}" in
+          production)
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}"
+              echo "REPO_NAME=${REPO_NAME}"
+              echo "EKS_CLUSTER_NAME=gek-prd"
+              echo "environment=production"
+              echo "NODE_ENV=production"
+              echo "K8S_NAMESPACE=worklib"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+              echo "DB_INSTANCE_IDENTIFIER=rds-pgsql-prd01"
+            } >> "$GITHUB_ENV"
+            ;;
+          preprod)
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}"
+              echo "REPO_NAME=${REPO_NAME}"
+              echo "EKS_CLUSTER_NAME=gek-ppd"
+              echo "environment=preprod"
+              echo "NODE_ENV=staging-aws"
+              echo "K8S_NAMESPACE=worklib"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+              echo "DB_INSTANCE_IDENTIFIER=rds-pgsql-ppd"
+            } >> "$GITHUB_ENV"
+            ;;
+          *)
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}"
+              echo "REPO_NAME=${REPO_NAME}"
+              echo "EKS_CLUSTER_NAME=gek-ppd"
+              echo "environment=qa"
+              echo "NODE_ENV=qa"
+              echo "K8S_NAMESPACE=worklib-qa"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+              echo "DB_INSTANCE_IDENTIFIER=rds-pgsql-ppd"
+            } >> "$GITHUB_ENV"
+            ;;
+        esac
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
       with:
@@ -161,24 +166,24 @@ jobs:
       if: ( inputs.NEEDS_MIGRATION )
       run: |
         # name of the snapshot will be like "rds-pgsql-prd-2022-08-13"
-        snapshot_name=${{ env.DB-INSTANCE-IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
+        snapshot_name=${{ env.DB_INSTANCE_IDENTIFIER }}-$(printf '%(%Y-%m-%d)T\n' -1)
 
         if [[ $(aws rds describe-db-snapshots --snapshot-type manual) == *"$snapshot_name"* ]]; then 
             echo "the snapshot already exists: $snapshot_name, waiting when it is complete.."; 
             # if the snapsot exists but in progress we have to wait till it finishes
-            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB_INSTANCE_IDENTIFIER }} --db-snapshot-identifier $snapshot_name
         else 
             # creates a snapshot of all the postgres DB instance
             echo "creating a snapshot: $snapshot_name"
-            echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
-            aws rds create-db-snapshot --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            echo "aws rds create-db-snapshot --db-instance-identifier ${{ env.DB_INSTANCE_IDENTIFIER }} --db-snapshot-identifier $snapshot_name"
+            aws rds create-db-snapshot --db-instance-identifier ${{ env.DB_INSTANCE_IDENTIFIER }} --db-snapshot-identifier $snapshot_name
             # wait till it finishes
-            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB-INSTANCE-IDENTIFIER }} --db-snapshot-identifier $snapshot_name
+            aws rds wait db-snapshot-completed --db-instance-identifier ${{ env.DB_INSTANCE_IDENTIFIER }} --db-snapshot-identifier $snapshot_name
         fi
 
          echo "deleting snapshots older 60 days"
          oldsnap=$(date -I --date "now -60 days")
-         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" | { grep "${{ env.DB-INSTANCE-IDENTIFIER }}" || true; } )
+         mysnap=$(aws rds describe-db-snapshots --snapshot-type manual --output text --query="DBSnapshots[?SnapshotCreateTime<'$oldsnap'].{Indentifier:DBSnapshotIdentifier}" | { grep "${{ env.DB_INSTANCE_IDENTIFIER }}" || true; } )
          for i in $(echo $mysnap);do aws rds delete-db-snapshot --db-snapshot-identifier $i  || echo "error on delete db-snapshot $i (not critical)" ; done
 
     - name: Deploy to EKS Cluster
@@ -230,21 +235,16 @@ jobs:
     name: slackNotificationResult
     runs-on: ubuntu-latest
     steps:
-    - uses: kanga333/variable-mapper@master
-      with:
-        key: "${{ inputs.TARGET_ENV }}"
-        map: |
-          {
-            "production": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
-            },
-            "preprod": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
-            },
-            ".*": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
-            }
-          }
+    - name: Set Slack webhook URL
+      run: |
+        case "${{ inputs.TARGET_ENV }}" in
+          production)
+            echo "SLACK_WEBHOOK_URL=${{ secrets.PRD_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+          preprod)
+            echo "SLACK_WEBHOOK_URL=${{ secrets.PPD_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+          *)
+            echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+        esac
 
     - name: Send notification to Slack
       id: slack
