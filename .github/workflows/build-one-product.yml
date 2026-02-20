@@ -76,13 +76,13 @@ jobs:
     steps:
       - name: Deployment details
         run: |
-          echo "Pipeline run by '${{ GITHUB.EVENT_NAME }}' on ${{ GITHUB.REF_TYPE }} '${{ github.ref_name }}'"
+          echo "Pipeline run by '${{ github.event_name }}' on ${{ github.ref_type }} '${{ github.ref_name }}'"
           echo "ENVIRONMENT=${{ inputs.ENVIRONMENT }} MICROSERVICE=${{ inputs.MICROSERVICE }}"
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: ${{ github.ref_name }}
 
       - name: Set tag and env
@@ -117,7 +117,13 @@ jobs:
           esac
 
           MICROSERVICE_SHORT_NAME=$(echo "${MICROSERVICE}" | awk -F'service-' '{ print $NF}')
-          migrationList=$(git diff origin/${{ inputs.PRODUCTION_BRANCH }} HEAD --name-only --diff-filter=d 2>/dev/null | grep migrations/ | awk '{printf "%s\\n", $0}' || true)
+
+          # Calcul des migrations uniquement si nécessaire (évite un fetch-depth: 0 coûteux)
+          migrationList=""
+          if [[ "${{ inputs.NEEDS_MIGRATION }}" == "true" ]]; then
+            git fetch origin ${{ inputs.PRODUCTION_BRANCH }} --depth=50 2>/dev/null || true
+            migrationList=$(git diff origin/${{ inputs.PRODUCTION_BRANCH }} HEAD --name-only --diff-filter=d 2>/dev/null | grep migrations/ | awk '{printf "%s\\n", $0}' || true)
+          fi
 
           if [[ ! "${MICROSERVICE}" =~ ^service- ]]; then
             DOCKERFILE="${MICROSERVICE}.dockerfile"
@@ -216,6 +222,12 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
+      - name: Setup SSH agent
+        if: inputs.NEEDS_IMAGE_BUILD == true && secrets.WORKLIB_GITHUB_SSH_KEY != ''
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
+
       - name: Configure AWS credentials
         if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true'
         uses: aws-actions/configure-aws-credentials@v4
@@ -250,34 +262,26 @@ jobs:
         if: inputs.NEEDS_IMAGE_BUILD == true
         env:
           IMAGE_FULL: ${{ steps.image-tag.outputs.image }}
-          DOCKER_BUILDKIT: 1
-          WORKLIB_GITHUB_SSH_KEY: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
           NOTION_ACCESS_TOKEN: ${{ secrets.NOTION_ACCESS_TOKEN }}
         run: |
-          if [ -z "$WORKLIB_GITHUB_SSH_KEY" ]; then
-            docker build \
-              --pull \
-              --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
-              -f ./${{ steps.set-tag.outputs.dockerfile }} \
-              -t $IMAGE_FULL \
-              .
-          else
-            echo "${WORKLIB_GITHUB_SSH_KEY}" > /tmp/ssh.key
-            docker build \
-              --pull \
-              --ssh default=/tmp/ssh.key \
-              --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
-              -f ./${{ steps.set-tag.outputs.dockerfile }} \
-              -t $IMAGE_FULL \
-              .
-          fi
+          # SSH agent configuré par le step précédent si WORKLIB_GITHUB_SSH_KEY est défini
+          SSH_ARGS=""
+          [[ -n "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" ]] && SSH_ARGS="--ssh default"
+          docker build \
+            $SSH_ARGS \
+            --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
+            -f ./${{ steps.set-tag.outputs.dockerfile }} \
+            -t $IMAGE_FULL \
+            .
           echo "image=$IMAGE_FULL" >> $GITHUB_OUTPUT
 
       - name: Push image to ECR
         if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true'
-        run: |
-          echo "Pushing image to ECR..."
-          docker push ${{ steps.build-image-service.outputs.image }}
+        run: docker push ${{ steps.build-image-service.outputs.image }}
+
+      - name: Setup kubectl
+        if: steps.set-tag.outputs.needs_deploy == 'true'
+        uses: azure/setup-kubectl@v3
 
       - name: Deploy to EKS Cluster
         if: steps.set-tag.outputs.needs_deploy == 'true'
@@ -299,21 +303,19 @@ jobs:
           chmod +x ./replace_parameters.sh
           ./replace_parameters.sh ${{ env.environment }} "NOTIMPORTANT" $MICROSERVICE_SHORT_NAME $IMAGE_TAG
           cd -
-          curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.22.6/bin/linux/amd64/kubectl
-          chmod a+rx kubectl
-          if ${{ inputs.NEEDS_MIGRATION }}; then
-            ./kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || true
+          if [[ "${{ inputs.NEEDS_MIGRATION }}" == "true" ]]; then
+            kubectl delete job job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }} || true
           fi
-          ./kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
-          if ${{ inputs.NEEDS_MIGRATION }}; then
-            kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=150s -n ${{ env.K8S_NAMESPACE }} || true
-            ./kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
+          kubectl apply -k ${deploy_dir}/overlays/${{ env.environment }}
+          if [[ "${{ inputs.NEEDS_MIGRATION }}" == "true" ]]; then
+            kubectl wait --for=condition=complete job/job-$MICROSERVICE_SHORT_NAME-migration --timeout=150s -n ${{ env.K8S_NAMESPACE }}
+            kubectl logs job/job-$MICROSERVICE_SHORT_NAME-migration -n ${{ env.K8S_NAMESPACE }}
             if [ "$(kubectl -n ${{ env.K8S_NAMESPACE }} get jobs job-$MICROSERVICE_SHORT_NAME-migration -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')" = "True" ]; then
               echo "DB migration failed"
               exit 1
             fi
           fi
-          ./kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
+          kubectl rollout status deployment $MICROSERVICE -n ${{ env.K8S_NAMESPACE }}
 
   notification:
     needs: build
