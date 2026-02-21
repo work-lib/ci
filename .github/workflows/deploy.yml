@@ -232,8 +232,10 @@ jobs:
               echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
           esac
       - name: Send notification to Slack
-        uses: slackapi/slack-github-action@v1.18.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "blocks": [
@@ -247,6 +249,3 @@ jobs:
                 { "type": "divider" }
               ]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

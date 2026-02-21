@@ -203,8 +203,10 @@ jobs:
 
       - name: Send notification to Slack
         if: steps.set-tag.outputs.needs_deploy == 'true'
-        uses: slackapi/slack-github-action@v1.18.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "text": "${{ steps.set-tag.outputs.deploy_type }} started for `${{ env.environment }}` on `${{ steps.set-tag.outputs.microservice_short_name }}`",
@@ -218,9 +220,6 @@ jobs:
                 }
               ]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
       - name: Check SSH key availability
         id: ssh-check
@@ -344,8 +343,10 @@ jobs:
               echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
           esac
       - name: Send notification to Slack
-        uses: slackapi/slack-github-action@v1.18.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "blocks": [
@@ -359,6 +360,3 @@ jobs:
                 { "type": "divider" }
               ]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
