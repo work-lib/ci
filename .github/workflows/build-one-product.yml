@@ -112,7 +112,17 @@ jobs:
             dev)       GIT_BRANCH="dev"; deploy_type="deployment"; needs_push=true; needs_deploy=true ;;
             autotest)  GIT_BRANCH="autotest"; deploy_type="autotest"; needs_push=true; needs_deploy=true ;;
             staging)   GIT_BRANCH="staging"; deploy_type="deployment"; needs_push=true; needs_deploy=true ;;
-            main)      GIT_BRANCH="${{ inputs.PRODUCTION_BRANCH }}"; deploy_type="docker image build"; needs_push=false; needs_deploy=false ;;
+            main)
+              GIT_BRANCH="${{ inputs.PRODUCTION_BRANCH }}"
+              needs_deploy=false
+              if [[ "${{ github.ref_type }}" == "tag" ]]; then
+                deploy_type="docker image push"
+                needs_push=true
+              else
+                deploy_type="docker image build"
+                needs_push=false
+              fi
+              ;;
             *)         echo "Unknown ENVIRONMENT: ${ENV_INPUT}"; exit 1 ;;
           esac
 
