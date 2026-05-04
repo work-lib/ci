@@ -1,0 +1,162 @@
+name: Destroy — Staging env (Linear)
+
+# ============================================================
+# OfficeRiders — Destruction d'un environnement staging
+#
+# Déclenché :
+#   - Automatiquement à la fermeture/merge d'une PR
+#   - Manuellement via workflow_dispatch
+#
+# Ce que ça fait :
+#   1. Supprime services/patches/lin-234.override.yml de sysadmin
+#   2. Commite + push dans sysadmin
+#   3. SSH sur la VM staging → git pull + destroy.sh LIN-234
+#
+# Usage dans un repo appelant :
+#   uses: work-lib/ci/.github/workflows/destroy-staging.yml@main
+#   secrets: inherit
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+      LINEAR_ID:
+        description: "Linear ID de l'env à détruire (ex: LIN-234). Déduit du nom de branche si absent."
+        required: false
+        type: string
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
+      SYSADMIN_DEPLOY_KEY:
+        required: true   # Clé SSH avec accès en écriture sur work-lib/sysadmin
+      STAGING_SLACK_WEBHOOK_URL:
+        required: false
+
+env:
+  GCP_PROJECT: officeriders-493413
+  GCP_ZONE: europe-west9-a
+  STAGING_VM: staging
+  SYSADMIN_REPO: git@github.com:work-lib/sysadmin.git
+  SYSADMIN_PATH: /root/sysadmin
+
+jobs:
+  destroy:
+    name: Destroy ${{ inputs.LINEAR_ID || github.head_ref || github.ref_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------
+      # Extraire le Linear ID (depuis l'input ou le nom de branche)
+      # -------------------------------------------------------
+      - name: Resolve Linear ID
+        id: resolve
+        run: |
+          # Priorité : input explicite > branche de la PR > branche courante
+          BRANCH="${{ inputs.LINEAR_ID || github.head_ref || github.ref_name }}"
+          LINEAR_ID=$(echo "$BRANCH" | grep -oiP '[A-Z]{2,8}-\d+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+
+          if [[ -z "$LINEAR_ID" ]]; then
+            echo "❌ Impossible de déduire le Linear ID depuis : $BRANCH"
+            exit 1
+          fi
+
+          PROJECT="${LINEAR_ID,,}"   # lin-234
+          echo "linear_id=$LINEAR_ID" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT"     >> "$GITHUB_OUTPUT"
+          echo "override_file=services/patches/${PROJECT}.override.yml" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------
+      # Auth GCP
+      # -------------------------------------------------------
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # -------------------------------------------------------
+      # Supprimer l'override dans sysadmin + commit + push
+      # -------------------------------------------------------
+      - name: Checkout sysadmin
+        uses: actions/checkout@v4
+        with:
+          repository: work-lib/sysadmin
+          ssh-key: ${{ secrets.SYSADMIN_DEPLOY_KEY }}
+          path: sysadmin
+
+      - name: Supprimer les fichiers override
+        id: cleanup_files
+        working-directory: sysadmin
+        run: |
+          PROJECT="${{ steps.resolve.outputs.project }}"
+          DELETED=false
+
+          # Supprimer les overrides de tous les stacks (services, web, worker)
+          for stack in services web worker; do
+            OVERRIDE="$stack/patches/${PROJECT}.override.yml"
+            if [[ -f "$OVERRIDE" ]]; then
+              git rm -f "$OVERRIDE"
+              echo "Supprimé : $OVERRIDE"
+              DELETED=true
+            fi
+          done
+
+          echo "deleted=$DELETED" >> "$GITHUB_OUTPUT"
+
+      - name: Commit & push sysadmin
+        if: steps.cleanup_files.outputs.deleted == 'true'
+        working-directory: sysadmin
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "staging: destroy ${{ steps.resolve.outputs.linear_id }}"
+          git push origin main
+
+      # -------------------------------------------------------
+      # Détruire l'env sur la VM staging
+      # -------------------------------------------------------
+      - name: Slack — début
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🗑️ *Destruction staging* — *${{ steps.resolve.outputs.linear_id }}*\nDéclenché par : @${{ github.actor }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      - name: Destroy sur VM staging
+        run: |
+          gcloud compute ssh ${{ env.STAGING_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              cd ${{ env.SYSADMIN_PATH }}
+              git pull --ff-only origin main
+              ./staging/destroy.sh ${{ steps.resolve.outputs.linear_id }}
+            "
+
+  # ---------------------------------------------------------
+  # Notification finale
+  # ---------------------------------------------------------
+  notification:
+    name: Notification finale
+    runs-on: ubuntu-latest
+    needs: destroy
+    if: always()
+
+    steps:
+      - name: Slack — résultat
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.destroy.result == 'success' && '✅' || '❌' }} *Staging ${{ needs.destroy.outputs.linear_id || inputs.LINEAR_ID }} détruit*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}

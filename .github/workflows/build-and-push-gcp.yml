@@ -1,0 +1,488 @@
+name: Build & Push — Google Artifact Registry + Deploy Swarm/Staging
+
+# ============================================================
+# OfficeRiders — Workflow réutilisable (GCP / Docker Swarm)
+#
+# Logique GitOps — l'état désiré est toujours dans sysadmin :
+#
+#   Staging (branche LIN-xxx)
+#     → build + push image
+#     → services/patches/lin-234.override.yml mis à jour dans sysadmin
+#     → VM staging : git pull + docker compose -f build-staging.yml -f lin-234.override.yml up
+#
+#   Production (git tag v*)
+#     → build + push image
+#     → services/patches/service-api-gateway.yml mis à jour dans sysadmin
+#     → docker-compose-merge régénère build-production.yml
+#     → prod-manager : git pull + docker stack deploy -c build-production.yml
+#
+#   Autre branche (main, etc.)
+#     → build + push uniquement (pas de deploy)
+#
+# Usage dans un repo service :
+#   uses: work-lib/ci/.github/workflows/build-and-push-gcp.yml@main
+#   with:
+#     STACK_DIR: services          # répertoire dans sysadmin (services | web | worker)
+#     STACK: officeriders          # nom du stack Swarm prod
+#   secrets: inherit
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+
+      SERVICE:
+        description: "Nom du service dans le stack (ex: service-api-gateway). Défaut: nom du repo."
+        required: false
+        type: string
+
+      IMAGE_NAME:
+        description: "Nom de l'image dans GAR. Défaut: nom du repo."
+        required: false
+        type: string
+
+      DOCKERFILE:
+        description: "Chemin du Dockerfile"
+        required: false
+        type: string
+        default: "Dockerfile"
+
+      STACK_DIR:
+        description: "Répertoire dans sysadmin (services | web | worker)"
+        required: false
+        type: string
+        default: "services"
+
+      STACK:
+        description: "Nom du stack Swarm prod (ex: officeriders, officeriders-web)"
+        required: false
+        type: string
+        default: "officeriders"
+
+      NEEDS_MIGRATION:
+        description: "Exécuter les migrations DB avant le déploiement prod"
+        required: false
+        type: boolean
+        default: false
+
+      NEEDS_DEPLOY:
+        description: "Activer le déploiement auto (prod + staging)"
+        required: false
+        type: boolean
+        default: true
+
+      PRODUCTION_BRANCH:
+        description: "Branche principale (build + push uniquement)"
+        required: false
+        type: string
+        default: "main"
+
+    secrets:
+      WORKLIB_GITHUB_SSH_KEY:
+        required: true
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
+      SYSADMIN_DEPLOY_KEY:
+        required: true   # Clé SSH avec accès en écriture sur work-lib/sysadmin
+      PRD_SLACK_WEBHOOK_URL:
+        required: false
+      STAGING_SLACK_WEBHOOK_URL:
+        required: false
+
+env:
+  GAR_REGISTRY: europe-west9-docker.pkg.dev
+  GCP_PROJECT: officeriders-493413
+  GAR_REPO: officeriders
+  GCP_ZONE: europe-west9-a
+  PROD_MANAGER_VM: prod-manager
+  STAGING_VM: staging
+  SYSADMIN_REPO: work-lib/sysadmin
+  SYSADMIN_PATH: /root/sysadmin
+
+jobs:
+
+  # ==========================================================
+  # 1. Build & Push
+  # ==========================================================
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_url:   ${{ steps.meta.outputs.image_url }}
+      image_tag:   ${{ steps.meta.outputs.image_tag }}
+      deploy_type: ${{ steps.context.outputs.deploy_type }}
+      linear_id:   ${{ steps.context.outputs.linear_id }}
+      project:     ${{ steps.context.outputs.project }}
+      service:     ${{ steps.meta.outputs.service }}
+      image_name:  ${{ steps.meta.outputs.image_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
+
+      - name: Determine context
+        id: context
+        run: |
+          SERVICE="${{ inputs.SERVICE || github.event.repository.name }}"
+          IMAGE_NAME="${{ inputs.IMAGE_NAME || github.event.repository.name }}"
+          REF="${{ github.ref }}"
+          REF_NAME="${{ github.ref_name }}"
+
+          LINEAR_ID=$(echo "$REF_NAME" | grep -oiP '[A-Z]{2,8}-\d+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+
+          if [[ "$REF" == refs/tags/v* ]]; then
+            DEPLOY_TYPE="prod"
+            IMAGE_TAG="${REF_NAME}"
+          elif [[ -n "$LINEAR_ID" ]]; then
+            DEPLOY_TYPE="staging"
+            IMAGE_TAG="sha-${GITHUB_SHA::8}"
+          else
+            DEPLOY_TYPE="none"
+            IMAGE_TAG="sha-${GITHUB_SHA::8}"
+          fi
+
+          PROJECT="${LINEAR_ID,,}"   # LIN-234 → lin-234
+
+          echo "deploy_type=$DEPLOY_TYPE" >> "$GITHUB_OUTPUT"
+          echo "linear_id=$LINEAR_ID"     >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT"         >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG"     >> "$GITHUB_OUTPUT"
+          echo "service=$SERVICE"         >> "$GITHUB_OUTPUT"
+          echo "image_name=$IMAGE_NAME"   >> "$GITHUB_OUTPUT"
+
+      - name: Image metadata
+        id: meta
+        run: |
+          IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ steps.context.outputs.image_name }}:${{ steps.context.outputs.image_tag }}"
+          echo "image_url=$IMAGE_URL"                              >> "$GITHUB_OUTPUT"
+          echo "image_tag=${{ steps.context.outputs.image_tag }}"  >> "$GITHUB_OUTPUT"
+          echo "service=${{ steps.context.outputs.service }}"      >> "$GITHUB_OUTPUT"
+          echo "image_name=${{ steps.context.outputs.image_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker pour GAR
+        run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
+
+      - name: Build & Push image
+        run: |
+          LATEST_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ steps.meta.outputs.image_name }}:latest"
+
+          docker build \
+            --file "${{ inputs.DOCKERFILE }}" \
+            --tag "${{ steps.meta.outputs.image_url }}" \
+            --label "git-commit=${{ github.sha }}" \
+            --label "git-ref=${{ github.ref_name }}" \
+            --cache-from "$LATEST_URL" \
+            .
+
+          docker push "${{ steps.meta.outputs.image_url }}"
+
+          # Tag :latest sur la branche principale
+          if [[ "${{ github.ref_name }}" == "${{ inputs.PRODUCTION_BRANCH }}" ]]; then
+            docker tag "${{ steps.meta.outputs.image_url }}" "$LATEST_URL"
+            docker push "$LATEST_URL"
+          fi
+
+  # ==========================================================
+  # 2. Mise à jour sysadmin (patch/override + commit + push)
+  # ==========================================================
+  update-sysadmin:
+    name: Update sysadmin (${{ needs.build.outputs.deploy_type }})
+    runs-on: ubuntu-latest
+    needs: build
+    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type != 'none'
+
+    outputs:
+      linear_id: ${{ needs.build.outputs.linear_id }}
+      project:   ${{ needs.build.outputs.project }}
+      service:   ${{ needs.build.outputs.service }}
+
+    steps:
+      - name: Checkout sysadmin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SYSADMIN_REPO }}
+          ssh-key: ${{ secrets.SYSADMIN_DEPLOY_KEY }}
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      # --------------------------------------------------------
+      # STAGING — créer/mettre à jour l'override par env Linear
+      # services/patches/lin-234.override.yml
+      # --------------------------------------------------------
+      - name: Mettre à jour override staging
+        if: needs.build.outputs.deploy_type == 'staging'
+        run: |
+          PROJECT="${{ needs.build.outputs.project }}"
+          SERVICE="${{ needs.build.outputs.service }}"
+          IMAGE_URL="${{ needs.build.outputs.image_url }}"
+          OVERRIDE="${{ inputs.STACK_DIR }}/patches/${PROJECT}.override.yml"
+
+          if [[ -f "$OVERRIDE" ]]; then
+            # Mettre à jour uniquement ce service dans l'override existant
+            yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$OVERRIDE"
+          else
+            # Créer l'override
+            cat > "$OVERRIDE" <<EOF
+          services:
+            ${SERVICE}:
+              image: ${IMAGE_URL}
+          EOF
+          fi
+
+          echo "Override mis à jour : $OVERRIDE"
+          cat "$OVERRIDE"
+
+      # --------------------------------------------------------
+      # PROD — mettre à jour le patch du service + régénérer build-production.yml
+      # services/patches/service-api-gateway.yml
+      # --------------------------------------------------------
+      - name: Mettre à jour patch prod
+        if: needs.build.outputs.deploy_type == 'prod'
+        run: |
+          SERVICE="${{ needs.build.outputs.service }}"
+          IMAGE_URL="${{ needs.build.outputs.image_url }}"
+          PATCH="${{ inputs.STACK_DIR }}/patches/${SERVICE}.yml"
+
+          if [[ -f "$PATCH" ]]; then
+            yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$PATCH"
+          else
+            cat > "$PATCH" <<EOF
+          services:
+            ${SERVICE}:
+              image: ${IMAGE_URL}
+          EOF
+          fi
+
+          echo "Patch mis à jour : $PATCH"
+          cat "$PATCH"
+
+      - name: Régénérer build-production.yml
+        if: needs.build.outputs.deploy_type == 'prod'
+        run: |
+          npm install -g docker-compose-merge --silent
+
+          STACK_DIR="${{ inputs.STACK_DIR }}"
+          BASE="$STACK_DIR/base"
+          PATCHES_DIR="$STACK_DIR/patches"
+
+          # Collecter les patches prod (hors build-*, hors *.staging.yml, hors *.override.yml)
+          PROD_ARGS=("$BASE/common.yml" "$BASE/swarm.yml")
+          while IFS= read -r f; do
+            [[ -n "$f" ]] && PROD_ARGS+=("$f")
+          done < <(find "$PATCHES_DIR" -maxdepth 1 -name "*.yml" \
+            ! -name "build-*" \
+            ! -name "*.staging.yml" \
+            ! -name "*.override.yml" \
+            | sort)
+
+          docker-compose-merge \
+            -i "${PROD_ARGS[@]}" \
+            -o "$PATCHES_DIR/build-production.yml"
+
+          echo "build-production.yml régénéré"
+
+      # --------------------------------------------------------
+      # Commit + push dans sysadmin
+      # --------------------------------------------------------
+      - name: Commit & push sysadmin
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add --all
+
+          if git diff --cached --quiet; then
+            echo "Aucun changement à commiter"
+            exit 0
+          fi
+
+          TYPE="${{ needs.build.outputs.deploy_type }}"
+          SERVICE="${{ needs.build.outputs.service }}"
+          TAG="${{ needs.build.outputs.image_tag }}"
+          LINEAR="${{ needs.build.outputs.linear_id }}"
+
+          if [[ "$TYPE" == "prod" ]]; then
+            MSG="deploy(prod): ${SERVICE} ${TAG}"
+          else
+            MSG="deploy(staging): ${SERVICE} ${TAG} [${LINEAR}]"
+          fi
+
+          git commit -m "$MSG"
+          git push origin main
+
+  # ==========================================================
+  # 3. Deploy — SSH sur la VM et apply
+  # ==========================================================
+  deploy:
+    name: Deploy (${{ needs.build.outputs.deploy_type }})
+    runs-on: ubuntu-latest
+    needs: [build, update-sysadmin]
+    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type != 'none'
+
+    steps:
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Slack — début (prod)
+        if: needs.build.outputs.deploy_type == 'prod'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🚀 *Deploy prod* — `${{ needs.build.outputs.service }}` `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      - name: Slack — début (staging)
+        if: needs.build.outputs.deploy_type == 'staging'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🔧 *Deploy staging* — `${{ needs.build.outputs.service }}` sur *${{ needs.build.outputs.linear_id }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      # --------------------------------------------------------
+      # Migration DB (prod uniquement, avant le deploy)
+      # --------------------------------------------------------
+      - name: Migration DB
+        if: inputs.NEEDS_MIGRATION && needs.build.outputs.deploy_type == 'prod'
+        run: |
+          JOB_NAME="migration-${{ needs.build.outputs.service }}-${{ github.run_id }}"
+          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              docker service create \
+                --name $JOB_NAME \
+                --mode replicated-job \
+                --network ornet \
+                --restart-condition none \
+                --with-registry-auth \
+                ${{ needs.build.outputs.image_url }} \
+                node dist/migrate.js
+
+              for i in \$(seq 1 30); do
+                STATUS=\$(docker service ps $JOB_NAME --format '{{.CurrentState}}' | head -1)
+                echo \"Migration: \$STATUS\"
+                [[ \"\$STATUS\" == Complete* ]] && break
+                [[ \"\$STATUS\" == Failed* ]] && exit 1
+                sleep 10
+              done
+
+              docker service rm $JOB_NAME
+            "
+
+      # --------------------------------------------------------
+      # Deploy PROD — git pull sysadmin + docker stack deploy
+      # --------------------------------------------------------
+      - name: Deploy → Swarm prod
+        if: needs.build.outputs.deploy_type == 'prod'
+        run: |
+          STACK_DIR="${{ inputs.STACK_DIR }}"
+          STACK="${{ inputs.STACK }}"
+
+          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              cd ${{ env.SYSADMIN_PATH }}
+              git pull --ff-only origin main
+              docker stack deploy \
+                --with-registry-auth \
+                -c ${STACK_DIR}/patches/build-production.yml \
+                ${STACK}
+            "
+
+      # --------------------------------------------------------
+      # Deploy STAGING — git pull sysadmin + docker compose avec override
+      # --------------------------------------------------------
+      - name: Deploy → Staging
+        if: needs.build.outputs.deploy_type == 'staging'
+        run: |
+          PROJECT="${{ needs.build.outputs.project }}"
+          SERVICE="${{ needs.build.outputs.service }}"
+          STACK_DIR="${{ inputs.STACK_DIR }}"
+
+          gcloud compute ssh ${{ env.STAGING_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              cd ${{ env.SYSADMIN_PATH }}
+              git pull --ff-only origin main
+
+              # Premier deploy de cet env : initialiser (DB, réseau, tous les services)
+              if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
+                ./staging/deploy.sh ${PROJECT^^} \
+                  --override ${STACK_DIR}/patches/${PROJECT}.override.yml
+              else
+                # Mise à jour du seul service modifié
+                docker compose \
+                  -p ${PROJECT} \
+                  -f ${STACK_DIR}/patches/build-staging.yml \
+                  -f ${STACK_DIR}/patches/${PROJECT}.override.yml \
+                  up -d --no-deps --force-recreate \
+                  ${SERVICE}
+              fi
+            "
+
+  # ==========================================================
+  # 4. Notification finale
+  # ==========================================================
+  notification:
+    name: Notification finale
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: always() && needs.build.outputs.deploy_type != 'none' && inputs.NEEDS_DEPLOY
+
+    steps:
+      - name: Slack — résultat (prod)
+        if: needs.build.outputs.deploy_type == 'prod'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* déployé en *production*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      - name: Slack — résultat (staging)
+        if: needs.build.outputs.deploy_type == 'staging'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* — staging *${{ needs.build.outputs.linear_id }}*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
