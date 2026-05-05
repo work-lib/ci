@@ -443,9 +443,9 @@ jobs:
               git pull --ff-only origin main
 
               # Premier deploy de cet env : initialiser (DB, réseau, tous les services)
+              # Les overrides sont auto-découverts par deploy.sh depuis le filesystem
               if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
-                ./staging/deploy.sh ${PROJECT^^} \
-                  --override ${STACK_DIR}/patches/${PROJECT}.override.yml
+                ./staging/deploy.sh ${PROJECT^^}
               else
                 # Mise à jour du seul service modifié
                 docker compose \

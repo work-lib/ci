@@ -1,0 +1,238 @@
+name: Deploy manuel — Docker Swarm Production
+
+# ============================================================
+# OfficeRiders — Déploiement manuel vers Swarm prod
+# Équivalent de deploy.yml (AWS/EKS) pour la nouvelle infra GCP
+#
+# Usage dans un repo appelant :
+#   uses: work-lib/ci/.github/workflows/deploy-swarm.yml@main
+#   with:
+#     TARGET_ENV: production
+#     IMAGE_TAG: v1.2.3
+#   secrets: inherit
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+
+      TARGET_ENV:
+        description: "Environnement cible : production | staging"
+        required: true
+        type: string
+
+      SERVICE:
+        description: "Nom du service dans le stack Swarm (ex: service-api-gateway)"
+        required: false
+        type: string
+
+      STACK:
+        description: "Nom du stack Swarm (ex: officeriders, officeriders-web)"
+        required: false
+        type: string
+        default: "officeriders"
+
+      IMAGE_NAME:
+        description: "Nom de l'image dans GAR (défaut: nom du repo)"
+        required: false
+        type: string
+
+      IMAGE_TAG:
+        description: "Tag de l'image à déployer (ex: v1.2.3 ou sha-abc1234)"
+        required: false
+        type: string
+        default: "latest"
+
+      LINEAR_ID:
+        description: "ID Linear pour deploy staging (ex: LIN-123) — requis si TARGET_ENV=staging"
+        required: false
+        type: string
+
+      NEEDS_MIGRATION:
+        description: "Exécuter les migrations DB avant le déploiement"
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
+      PRD_SLACK_WEBHOOK_URL:
+        required: false
+      STAGING_SLACK_WEBHOOK_URL:
+        required: false
+
+env:
+  GAR_REGISTRY: europe-west9-docker.pkg.dev
+  GCP_PROJECT: officeriders-493413
+  GAR_REPO: officeriders
+  GCP_ZONE: europe-west9-a
+  PROD_MANAGER_VM: prod-manager
+  STAGING_VM: staging
+  SYSADMIN_PATH: /root/sysadmin
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.TARGET_ENV }}
+    runs-on: ubuntu-latest
+
+    # Protection : deploy prod uniquement depuis main ou via workflow_dispatch
+    # (pas de deploy accidentel depuis une feature branch)
+    if: |
+      inputs.TARGET_ENV == 'staging' ||
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/')
+
+    outputs:
+      service:   ${{ steps.meta.outputs.service }}
+      image_url: ${{ steps.meta.outputs.image_url }}
+
+    steps:
+      - name: Metadata
+        id: meta
+        run: |
+          SERVICE="${{ inputs.SERVICE || github.event.repository.name }}"
+          IMAGE_NAME="${{ inputs.IMAGE_NAME || github.event.repository.name }}"
+          IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${IMAGE_NAME}:${{ inputs.IMAGE_TAG }}"
+          echo "service=$SERVICE"     >> "$GITHUB_OUTPUT"
+          echo "image_url=$IMAGE_URL" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------
+      # Auth GCP via Workload Identity Federation
+      # -------------------------------------------------------
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # -------------------------------------------------------
+      # Notification de début
+      # -------------------------------------------------------
+      - name: Slack — début (prod)
+        if: inputs.TARGET_ENV == 'production'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🚀 *Deploy manuel prod* — `${{ steps.meta.outputs.service }}` `${{ inputs.IMAGE_TAG }}`\nDeclenché par : @${{ github.actor }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      - name: Slack — début (staging)
+        if: inputs.TARGET_ENV == 'staging'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🔧 *Deploy manuel staging* — `${{ steps.meta.outputs.service }}` sur *${{ inputs.LINEAR_ID }}*\nTag : `${{ inputs.IMAGE_TAG }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      # -------------------------------------------------------
+      # Migration DB (prod uniquement)
+      # -------------------------------------------------------
+      - name: Migration DB
+        if: inputs.NEEDS_MIGRATION && inputs.TARGET_ENV == 'production'
+        run: |
+          JOB_NAME="migration-${{ steps.meta.outputs.service }}-${{ github.run_id }}"
+          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              docker service create \
+                --name $JOB_NAME \
+                --mode replicated-job \
+                --network ornet \
+                --restart-condition none \
+                --with-registry-auth \
+                ${{ steps.meta.outputs.image_url }} \
+                node dist/migrate.js
+
+              for i in \$(seq 1 30); do
+                STATUS=\$(docker service ps $JOB_NAME --format '{{.CurrentState}}' | head -1)
+                echo \"Migration: \$STATUS\"
+                [[ \"\$STATUS\" == Complete* ]] && break
+                [[ \"\$STATUS\" == Failed* ]] && exit 1
+                sleep 10
+              done
+
+              docker service rm $JOB_NAME
+            "
+
+      # -------------------------------------------------------
+      # Deploy Prod — Swarm service update
+      # -------------------------------------------------------
+      - name: Deploy → Swarm prod
+        if: inputs.TARGET_ENV == 'production'
+        run: |
+          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "docker service update \
+                --image ${{ steps.meta.outputs.image_url }} \
+                --with-registry-auth \
+                ${{ inputs.STACK }}_${{ steps.meta.outputs.service }}"
+
+      # -------------------------------------------------------
+      # Deploy Staging — docker compose service update
+      # -------------------------------------------------------
+      - name: Deploy → Staging
+        if: inputs.TARGET_ENV == 'staging'
+        run: |
+          LINEAR_ID="${{ inputs.LINEAR_ID }}"
+          if [[ -z "$LINEAR_ID" ]]; then
+            echo "❌ LINEAR_ID requis pour un deploy staging"
+            exit 1
+          fi
+          PROJECT="${LINEAR_ID,,}"
+
+          gcloud compute ssh ${{ env.STAGING_VM }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --tunnel-through-iap \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            -- "
+              cd ${{ env.SYSADMIN_PATH }}
+              git pull --ff-only origin main
+              ./staging/deploy.sh $LINEAR_ID --tag ${{ inputs.IMAGE_TAG }}
+            "
+
+  # ---------------------------------------------------------
+  # Notification finale
+  # ---------------------------------------------------------
+  notification:
+    name: Notification finale
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+
+    steps:
+      - name: Slack — résultat (prod)
+        if: inputs.TARGET_ENV == 'production'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.deploy.outputs.service }}* — production\nTag : `${{ inputs.IMAGE_TAG }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+
+      - name: Slack — résultat (staging)
+        if: inputs.TARGET_ENV == 'staging'
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.deploy.outputs.service }}* — staging *${{ inputs.LINEAR_ID }}*\nTag : `${{ inputs.IMAGE_TAG }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
