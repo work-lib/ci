@@ -1,0 +1,87 @@
+name: Fetch secrets from Bitwarden
+description: >
+  Authentification à Vaultwarden via les credentials dans GCP Secret Manager.
+  Exporte les secrets demandés comme variables d'environnement masquées.
+
+  Convention items (une entrée par ligne) :
+    NOM_ITEM_BW:NOM_ENV_VAR:champ
+  Champ : notes | password | username (défaut : notes)
+
+  Exemple :
+    CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
+    CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
+
+inputs:
+  items:
+    description: Triplets "BW_ITEM:ENV_VAR:field" (un par ligne)
+    required: true
+
+runs:
+  using: composite
+
+  steps:
+    - name: Install Bitwarden CLI
+      shell: bash
+      run: |
+        if ! command -v bw &> /dev/null; then
+          npm install -g @bitwarden/cli --quiet 2>/dev/null
+        fi
+
+    - name: Login Bitwarden via GCP SM
+      shell: bash
+      env:
+        BW_SERVER: https://vault.worklib.io
+        GCP_PROJECT: officeriders-493413
+      run: |
+        set -euo pipefail
+
+        # Récupérer les credentials Bitwarden depuis GCP Secret Manager
+        # (le SA github-actions a roles/secretmanager.secretAccessor sur ces 3 secrets)
+        BW_CLIENTID=$(gcloud secrets versions access latest \
+          --secret=BW_CLIENTID --project="$GCP_PROJECT")
+        BW_CLIENTSECRET=$(gcloud secrets versions access latest \
+          --secret=BW_CLIENTSECRET --project="$GCP_PROJECT")
+        BW_MASTER=$(gcloud secrets versions access latest \
+          --secret=BW_MASTER_PASSWORD --project="$GCP_PROJECT")
+
+        bw config server "$BW_SERVER" > /dev/null
+        bw logout > /dev/null 2>&1 || true
+
+        # Login API key + unlock master password
+        export BW_CLIENTID BW_CLIENTSECRET
+        bw login --apikey > /dev/null 2>&1
+
+        BW_SESSION=$(bw unlock "$BW_MASTER" --raw)
+        echo "BW_SESSION=$BW_SESSION" >> "$GITHUB_ENV"
+
+        unset BW_MASTER BW_CLIENTID BW_CLIENTSECRET
+
+    - name: Fetch secrets
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        while IFS=: read -r item env_var field || [[ -n "${item:-}" ]]; do
+          # Ignorer lignes vides / commentaires
+          item="${item//[[:space:]]/}"
+          [[ -z "$item" || "$item" == \#* ]] && continue
+
+          env_var="${env_var//[[:space:]]/}"
+          field="${field:-notes}"
+          field="${field//[[:space:]]/}"
+
+          value=$(bw get "$field" "$item")
+
+          # Masquer dans les logs
+          echo "::add-mask::$value"
+
+          # Export multiline-safe
+          printf '%s<<%s\n%s\n%s\n' "$env_var" "BWEOF_${env_var}" "$value" "BWEOF_${env_var}" \
+            >> "$GITHUB_ENV"
+
+          echo "✅ $item → \$$env_var"
+        done <<< "${{ inputs.items }}"
+
+        # Verrouiller le vault et effacer la session
+        bw lock > /dev/null 2>&1 || true
+        echo "BW_SESSION=" >> "$GITHUB_ENV"

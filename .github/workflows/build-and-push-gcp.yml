@@ -3,28 +3,31 @@ name: Build & Push — Google Artifact Registry + Deploy Swarm/Staging
 # ============================================================
 # OfficeRiders — Workflow réutilisable (GCP / Docker Swarm)
 #
+# Secrets : aucun dans GitHub.
+# Tous les secrets viennent de Bitwarden via GCP Secret Manager.
+# GCP SM contient uniquement les 3 credentials d'accès Bitwarden :
+#   BW_CLIENTID, BW_CLIENTSECRET, BW_MASTER_PASSWORD
+#
+# Identifiants WIF hardcodés (non-sensibles, simples noms de ressources).
+#
 # Logique GitOps — l'état désiré est toujours dans sysadmin :
 #
 #   Staging (branche LIN-xxx)
 #     → build + push image
 #     → services/patches/lin-234.override.yml mis à jour dans sysadmin
-#     → VM staging : git pull + docker compose -f build-staging.yml -f lin-234.override.yml up
+#     → VM staging : git pull + deploy.sh (auto-découverte overrides)
 #
 #   Production (git tag v*)
 #     → build + push image
 #     → services/patches/service-api-gateway.yml mis à jour dans sysadmin
 #     → docker-compose-merge régénère build-production.yml
-#     → prod-manager : git pull + docker stack deploy -c build-production.yml
-#
-#   Autre branche (main, etc.)
-#     → build + push uniquement (pas de deploy)
+#     → prod-manager : git pull + docker stack deploy
 #
 # Usage dans un repo service :
-#   uses: work-lib/ci/.github/workflows/build-and-push-gcp.yml@main
+#   uses: work-lib/ci/.github/workflows/build-and-push-gcp.yml@dev
 #   with:
-#     STACK_DIR: services          # répertoire dans sysadmin (services | web | worker)
-#     STACK: officeriders          # nom du stack Swarm prod
-#   secrets: inherit
+#     STACK_DIR: services
+#     STACK: officeriders
 # ============================================================
 
 on:
@@ -77,20 +80,6 @@ on:
         type: string
         default: "main"
 
-    secrets:
-      WORKLIB_GITHUB_SSH_KEY:
-        required: true
-      GCP_WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      GCP_SERVICE_ACCOUNT:
-        required: true
-      SYSADMIN_DEPLOY_KEY:
-        required: true   # Clé SSH avec accès en écriture sur work-lib/sysadmin
-      PRD_SLACK_WEBHOOK_URL:
-        required: false
-      STAGING_SLACK_WEBHOOK_URL:
-        required: false
-
 env:
   GAR_REGISTRY: europe-west9-docker.pkg.dev
   GCP_PROJECT: officeriders-493413
@@ -100,6 +89,9 @@ env:
   STAGING_VM: staging
   SYSADMIN_REPO: work-lib/sysadmin
   SYSADMIN_PATH: /root/sysadmin
+  # Identifiants WIF — non-sensibles (noms de ressources GCP, pas des clés)
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/708989881939/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  GCP_SERVICE_ACCOUNT: github-actions@officeriders-493413.iam.gserviceaccount.com
 
 jobs:
 
@@ -120,10 +112,30 @@ jobs:
       image_name:  ${{ steps.meta.outputs.image_name }}
 
     steps:
+      # Auth GCP en premier : nécessaire pour bw-fetch (GCP SM)
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Fetch WORKLIB_GITHUB_SSH_KEY depuis Bitwarden pour le checkout + docker build
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_WORKLIB_GITHUB_SSH_KEY:WORKLIB_GITHUB_SSH_KEY:notes
+
+      - name: Setup SSH agent (WORKLIB_GITHUB_SSH_KEY)
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.WORKLIB_GITHUB_SSH_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.WORKLIB_GITHUB_SSH_KEY }}
 
       - name: Determine context
         id: context
@@ -159,19 +171,10 @@ jobs:
         id: meta
         run: |
           IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ steps.context.outputs.image_name }}:${{ steps.context.outputs.image_tag }}"
-          echo "image_url=$IMAGE_URL"                              >> "$GITHUB_OUTPUT"
-          echo "image_tag=${{ steps.context.outputs.image_tag }}"  >> "$GITHUB_OUTPUT"
-          echo "service=${{ steps.context.outputs.service }}"      >> "$GITHUB_OUTPUT"
+          echo "image_url=$IMAGE_URL"                               >> "$GITHUB_OUTPUT"
+          echo "image_tag=${{ steps.context.outputs.image_tag }}"   >> "$GITHUB_OUTPUT"
+          echo "service=${{ steps.context.outputs.service }}"       >> "$GITHUB_OUTPUT"
           echo "image_name=${{ steps.context.outputs.image_name }}" >> "$GITHUB_OUTPUT"
-
-      - name: Auth GCP
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker pour GAR
         run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
@@ -185,6 +188,7 @@ jobs:
             --tag "${{ steps.meta.outputs.image_url }}" \
             --label "git-commit=${{ github.sha }}" \
             --label "git-ref=${{ github.ref_name }}" \
+            --ssh default \
             --cache-from "$LATEST_URL" \
             .
 
@@ -211,11 +215,30 @@ jobs:
       service:   ${{ needs.build.outputs.service }}
 
     steps:
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
+
+      - name: Setup SSH agent (SYSADMIN_DEPLOY_KEY)
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+
       - name: Checkout sysadmin
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SYSADMIN_REPO }}
-          ssh-key: ${{ secrets.SYSADMIN_DEPLOY_KEY }}
 
       - name: Install yq
         run: |
@@ -225,7 +248,6 @@ jobs:
 
       # --------------------------------------------------------
       # STAGING — créer/mettre à jour l'override par env Linear
-      # services/patches/lin-234.override.yml
       # --------------------------------------------------------
       - name: Mettre à jour override staging
         if: needs.build.outputs.deploy_type == 'staging'
@@ -236,10 +258,8 @@ jobs:
           OVERRIDE="${{ inputs.STACK_DIR }}/patches/${PROJECT}.override.yml"
 
           if [[ -f "$OVERRIDE" ]]; then
-            # Mettre à jour uniquement ce service dans l'override existant
             yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$OVERRIDE"
           else
-            # Créer l'override
             cat > "$OVERRIDE" <<EOF
           services:
             ${SERVICE}:
@@ -252,7 +272,6 @@ jobs:
 
       # --------------------------------------------------------
       # PROD — mettre à jour le patch du service + régénérer build-production.yml
-      # services/patches/service-api-gateway.yml
       # --------------------------------------------------------
       - name: Mettre à jour patch prod
         if: needs.build.outputs.deploy_type == 'prod'
@@ -280,14 +299,10 @@ jobs:
           npm install -g docker-compose-merge --silent
 
           STACK_DIR="${{ inputs.STACK_DIR }}"
-          BASE="$STACK_DIR/base"
-          PATCHES_DIR="$STACK_DIR/patches"
-
-          # Collecter les patches prod (hors build-*, hors *.staging.yml, hors *.override.yml)
-          PROD_ARGS=("$BASE/common.yml" "$BASE/swarm.yml")
+          PROD_ARGS=("$STACK_DIR/base/common.yml" "$STACK_DIR/base/swarm.yml")
           while IFS= read -r f; do
             [[ -n "$f" ]] && PROD_ARGS+=("$f")
-          done < <(find "$PATCHES_DIR" -maxdepth 1 -name "*.yml" \
+          done < <(find "$STACK_DIR/patches" -maxdepth 1 -name "*.yml" \
             ! -name "build-*" \
             ! -name "*.staging.yml" \
             ! -name "*.override.yml" \
@@ -295,13 +310,10 @@ jobs:
 
           docker-compose-merge \
             -i "${PROD_ARGS[@]}" \
-            -o "$PATCHES_DIR/build-production.yml"
+            -o "$STACK_DIR/patches/build-production.yml"
 
           echo "build-production.yml régénéré"
 
-      # --------------------------------------------------------
-      # Commit + push dans sysadmin
-      # --------------------------------------------------------
       - name: Commit & push sysadmin
         run: |
           git config user.name  "github-actions[bot]"
@@ -341,17 +353,24 @@ jobs:
       - name: Auth GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
+            CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod'
         uses: slackapi/slack-github-action@v1.26.0
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
@@ -361,7 +380,7 @@ jobs:
         if: needs.build.outputs.deploy_type == 'staging'
         uses: slackapi/slack-github-action@v1.26.0
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
@@ -401,7 +420,7 @@ jobs:
             "
 
       # --------------------------------------------------------
-      # Deploy PROD — git pull sysadmin + docker stack deploy
+      # Deploy PROD
       # --------------------------------------------------------
       - name: Deploy → Swarm prod
         if: needs.build.outputs.deploy_type == 'prod'
@@ -424,7 +443,7 @@ jobs:
             "
 
       # --------------------------------------------------------
-      # Deploy STAGING — git pull sysadmin + docker compose avec override
+      # Deploy STAGING
       # --------------------------------------------------------
       - name: Deploy → Staging
         if: needs.build.outputs.deploy_type == 'staging'
@@ -442,7 +461,7 @@ jobs:
               cd ${{ env.SYSADMIN_PATH }}
               git pull --ff-only origin main
 
-              # Premier deploy de cet env : initialiser (DB, réseau, tous les services)
+              # Premier deploy : initialiser (DB, réseau, tous les services)
               # Les overrides sont auto-découverts par deploy.sh depuis le filesystem
               if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
                 ./staging/deploy.sh ${PROJECT^^}
@@ -467,11 +486,27 @@ jobs:
     if: always() && needs.build.outputs.deploy_type != 'none' && inputs.NEEDS_DEPLOY
 
     steps:
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
+            CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
+
       - name: Slack — résultat (prod)
         if: needs.build.outputs.deploy_type == 'prod'
         uses: slackapi/slack-github-action@v1.26.0
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.PRD_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
@@ -481,7 +516,7 @@ jobs:
         if: needs.build.outputs.deploy_type == 'staging'
         uses: slackapi/slack-github-action@v1.26.0
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
