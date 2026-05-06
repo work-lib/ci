@@ -488,6 +488,10 @@ jobs:
           SERVICE="${{ needs.build.outputs.service }}"
           STACK_DIR="${{ inputs.STACK_DIR }}"
 
+          # Token GAR court-terme généré par le runner (déjà auth WIF)
+          # Passé à la VM via SSH pour docker login — pas de credentials sur la VM
+          GAR_TOKEN=$(gcloud auth print-access-token)
+
           gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
             --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
@@ -499,6 +503,11 @@ jobs:
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -p 2222 root@localhost "
             set -euo pipefail
+
+            echo '${GAR_TOKEN}' | docker login \
+              -u oauth2accesstoken --password-stdin \
+              ${{ env.GAR_REGISTRY }}
+
             cd ${{ env.SYSADMIN_PATH }}
             git pull --ff-only origin main
 
