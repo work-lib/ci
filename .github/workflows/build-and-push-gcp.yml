@@ -116,7 +116,11 @@ jobs:
       image_name:  ${{ steps.meta.outputs.image_name }}
 
     steps:
-      # Auth GCP en premier : nécessaire pour bw-fetch (GCP SM)
+      # Checkout en premier : évite que auth GCP crée son fichier credentials
+      # dans le workspace avant que checkout l'écrase
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Auth GCP
         uses: google-github-actions/auth@v2
         with:
@@ -126,7 +130,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # Fetch WORKLIB_GITHUB_SSH_KEY depuis Bitwarden pour le checkout + docker build
+      # Fetch WORKLIB_GITHUB_SSH_KEY depuis Bitwarden (pour docker build --ssh)
       - name: Fetch secrets (Bitwarden)
         uses: work-lib/ci/.github/actions/bw-fetch@dev
         with:
@@ -137,9 +141,6 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ env.WORKLIB_GITHUB_SSH_KEY }}
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Determine context
         id: context
