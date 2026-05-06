@@ -78,8 +78,10 @@ runs:
             continue
           fi
 
-          # Masquer dans les logs
-          echo "::add-mask::$value"
+          # Masquer ligne par ligne — ::add-mask:: ne supporte pas les multilignes
+          while IFS= read -r _line; do
+            [[ -n "$_line" ]] && echo "::add-mask::$_line"
+          done <<< "$value"
 
           # Export multiline-safe
           printf '%s<<%s\n%s\n%s\n' "$env_var" "BWEOF_${env_var}" "$value" "BWEOF_${env_var}" \
