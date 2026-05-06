@@ -372,6 +372,8 @@ jobs:
           items: |
             CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
+            CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
+            CI_PROD_SSH_KEY:PROD_SSH_KEY:notes
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
@@ -394,37 +396,58 @@ jobs:
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🔧 *Deploy staging* — `${{ needs.build.outputs.service }}` sur *${{ needs.build.outputs.linear_id }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
       # --------------------------------------------------------
+      # Tunnel IAP — helper utilisé par staging et prod
+      # --------------------------------------------------------
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          if [[ -n "${STAGING_SSH_KEY:-}" ]]; then
+            printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/staging_ci
+            chmod 600 ~/.ssh/staging_ci
+          fi
+          if [[ -n "${PROD_SSH_KEY:-}" ]]; then
+            printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/prod_ci
+            chmod 600 ~/.ssh/prod_ci
+          fi
+
+      # --------------------------------------------------------
       # Migration DB (prod uniquement, avant le deploy)
       # --------------------------------------------------------
       - name: Migration DB
         if: inputs.NEEDS_MIGRATION && needs.build.outputs.deploy_type == 'prod'
         run: |
           JOB_NAME="migration-${{ needs.build.outputs.service }}-${{ github.run_id }}"
-          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+
+          gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
+            --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} \
-            --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
-            -- "
-              docker service create \
-                --name $JOB_NAME \
-                --mode replicated-job \
-                --network ornet \
-                --restart-condition none \
-                --with-registry-auth \
-                ${{ needs.build.outputs.image_url }} \
-                node dist/migrate.js
+            --project=${{ env.GCP_PROJECT }} &
+          IAP_PID=$!
+          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
 
-              for i in \$(seq 1 30); do
-                STATUS=\$(docker service ps $JOB_NAME --format '{{.CurrentState}}' | head -1)
-                echo \"Migration: \$STATUS\"
-                [[ \"\$STATUS\" == Complete* ]] && break
-                [[ \"\$STATUS\" == Failed* ]] && exit 1
-                sleep 10
-              done
+          ssh -i ~/.ssh/prod_ci \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -p 2222 root@localhost "
+            set -euo pipefail
+            docker service create \
+              --name $JOB_NAME \
+              --mode replicated-job \
+              --network ornet \
+              --restart-condition none \
+              --with-registry-auth \
+              ${{ needs.build.outputs.image_url }} \
+              node dist/migrate.js
 
-              docker service rm $JOB_NAME
-            "
+            for i in \$(seq 1 30); do
+              STATUS=\$(docker service ps $JOB_NAME --format '{{.CurrentState}}' | head -1)
+              echo \"Migration: \$STATUS\"
+              [[ \"\$STATUS\" == Complete* ]] && break
+              [[ \"\$STATUS\" == Failed* ]] && exit 1
+              sleep 10
+            done
+            docker service rm $JOB_NAME
+          "
+          kill $IAP_PID || true
 
       # --------------------------------------------------------
       # Deploy PROD
@@ -435,19 +458,25 @@ jobs:
           STACK_DIR="${{ inputs.STACK_DIR }}"
           STACK="${{ inputs.STACK }}"
 
-          gcloud compute ssh ${{ env.PROD_MANAGER_VM }} \
+          gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
+            --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} \
-            --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
-            -- "
-              cd ${{ env.SYSADMIN_PATH }}
-              git pull --ff-only origin main
-              docker stack deploy \
-                --with-registry-auth \
-                -c ${STACK_DIR}/patches/build-production.yml \
-                ${STACK}
-            "
+            --project=${{ env.GCP_PROJECT }} &
+          IAP_PID=$!
+          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
+
+          ssh -i ~/.ssh/prod_ci \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -p 2222 root@localhost "
+            set -euo pipefail
+            cd ${{ env.SYSADMIN_PATH }}
+            git pull --ff-only origin main
+            docker stack deploy \
+              --with-registry-auth \
+              -c ${STACK_DIR}/patches/build-production.yml \
+              ${STACK}
+          "
+          kill $IAP_PID || true
 
       # --------------------------------------------------------
       # Deploy STAGING
@@ -459,29 +488,32 @@ jobs:
           SERVICE="${{ needs.build.outputs.service }}"
           STACK_DIR="${{ inputs.STACK_DIR }}"
 
-          gcloud compute ssh ${{ env.STAGING_VM }} \
+          gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
+            --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} \
-            --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
-            -- "
-              cd ${{ env.SYSADMIN_PATH }}
-              git pull --ff-only origin main
+            --project=${{ env.GCP_PROJECT }} &
+          IAP_PID=$!
+          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
 
-              # Premier deploy : initialiser (DB, réseau, tous les services)
-              # Les overrides sont auto-découverts par deploy.sh depuis le filesystem
-              if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
-                ./staging/deploy.sh ${PROJECT^^}
-              else
-                # Mise à jour du seul service modifié
-                docker compose \
-                  -p ${PROJECT} \
-                  -f ${STACK_DIR}/patches/build-staging.yml \
-                  -f ${STACK_DIR}/patches/${PROJECT}.override.yml \
-                  up -d --no-deps --force-recreate \
-                  ${SERVICE}
-              fi
-            "
+          ssh -i ~/.ssh/staging_ci \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -p 2222 root@localhost "
+            set -euo pipefail
+            cd ${{ env.SYSADMIN_PATH }}
+            git pull --ff-only origin main
+
+            if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
+              ./staging/deploy.sh ${PROJECT^^}
+            else
+              docker compose \
+                -p ${PROJECT} \
+                -f ${STACK_DIR}/patches/build-staging.yml \
+                -f ${STACK_DIR}/patches/${PROJECT}.override.yml \
+                up -d --no-deps --force-recreate \
+                ${SERVICE}
+            fi
+          "
+          kill $IAP_PID || true
 
   # ==========================================================
   # 4. Notification finale
