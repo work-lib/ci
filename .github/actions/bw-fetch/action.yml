@@ -70,7 +70,13 @@ runs:
           field="${field:-notes}"
           field="${field//[[:space:]]/}"
 
-          value=$(bw get "$field" "$item")
+          # Récupération — échec non-fatal (item optionnel ou absent)
+          value=$(bw get "$field" "$item" 2>/dev/null || true)
+
+          if [[ -z "${value:-}" ]]; then
+            echo "⚠️  $item introuvable dans Bitwarden — \$$env_var sera vide"
+            continue
+          fi
 
           # Masquer dans les logs
           echo "::add-mask::$value"

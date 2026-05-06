@@ -188,7 +188,7 @@ jobs:
             --tag "${{ steps.meta.outputs.image_url }}" \
             --label "git-commit=${{ github.sha }}" \
             --label "git-ref=${{ github.ref_name }}" \
-            --ssh default \
+            --ssh ssh_key \
             --cache-from "$LATEST_URL" \
             .
 
@@ -367,7 +367,7 @@ jobs:
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
 
       - name: Slack — début (prod)
-        if: needs.build.outputs.deploy_type == 'prod'
+        if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.26.0
         env:
           SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
@@ -377,7 +377,7 @@ jobs:
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🚀 *Deploy prod* — `${{ needs.build.outputs.service }}` `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
       - name: Slack — début (staging)
-        if: needs.build.outputs.deploy_type == 'staging'
+        if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.26.0
         env:
           SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
@@ -503,7 +503,7 @@ jobs:
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
 
       - name: Slack — résultat (prod)
-        if: needs.build.outputs.deploy_type == 'prod'
+        if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.26.0
         env:
           SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
@@ -513,7 +513,7 @@ jobs:
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* déployé en *production*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
       - name: Slack — résultat (staging)
-        if: needs.build.outputs.deploy_type == 'staging'
+        if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.26.0
         env:
           SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
