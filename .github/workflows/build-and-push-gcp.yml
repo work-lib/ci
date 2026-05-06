@@ -245,6 +245,7 @@ jobs:
         with:
           repository: ${{ env.SYSADMIN_REPO }}
           ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+          ref: main
 
       - name: Install yq
         run: |
