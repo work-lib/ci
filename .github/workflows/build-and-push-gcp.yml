@@ -157,7 +157,7 @@ jobs:
             IMAGE_TAG="${REF_NAME}"
           elif [[ -n "$LINEAR_ID" ]]; then
             DEPLOY_TYPE="staging"
-            IMAGE_TAG="sha-${GITHUB_SHA::8}"
+            IMAGE_TAG="${LINEAR_ID,,}-${{ github.run_number }}"
           else
             DEPLOY_TYPE="none"
             IMAGE_TAG="sha-${GITHUB_SHA::8}"
@@ -244,6 +244,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SYSADMIN_REPO }}
+          ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
 
       - name: Install yq
         run: |
