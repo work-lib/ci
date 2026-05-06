@@ -80,6 +80,10 @@ on:
         type: string
         default: "main"
 
+permissions:
+  id-token: write   # Requis pour Workload Identity Federation (google-github-actions/auth)
+  contents: read    # Requis pour actions/checkout
+
 env:
   GAR_REGISTRY: europe-west9-docker.pkg.dev
   GCP_PROJECT: officeriders-493413
