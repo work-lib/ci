@@ -1,0 +1,278 @@
+name: Build & Push GCP — Frontend Monorepo (Staging/Linear)
+
+# ============================================================
+# Workflow réutilisable pour le monorepo frontend.
+# Construit web-app, host-app et landing-page en parallèle,
+# puis met à jour web/patches/<project>.override.yml dans sysadmin
+# et déploie le stack web sur la VM staging.
+#
+# Usage :
+#   uses: work-lib/ci/.github/workflows/build-and-push-gcp-frontend.yml@dev
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+      NEEDS_DEPLOY:
+        description: "Activer le déploiement sur staging"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  GAR_REGISTRY: europe-west9-docker.pkg.dev
+  GCP_PROJECT: officeriders-493413
+  GAR_REPO: officeriders
+  GCP_ZONE: europe-west9-a
+  STAGING_VM: staging
+  SYSADMIN_REPO: work-lib/sysadmin
+  SYSADMIN_PATH: /root/sysadmin
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/708989881939/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  GCP_SERVICE_ACCOUNT: github-actions@officeriders-493413.iam.gserviceaccount.com
+
+jobs:
+
+  # ==========================================================
+  # 1. Contexte : linear_id + image_tag
+  # ==========================================================
+  context:
+    name: Determine context
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_type: ${{ steps.ctx.outputs.deploy_type }}
+      linear_id:   ${{ steps.ctx.outputs.linear_id }}
+      project:     ${{ steps.ctx.outputs.project }}
+      image_tag:   ${{ steps.ctx.outputs.image_tag }}
+    steps:
+      - name: Compute
+        id: ctx
+        run: |
+          REF_NAME="${{ github.ref_name }}"
+          LINEAR_ID=$(echo "$REF_NAME" | grep -oiP '[A-Z]{2,8}-\d+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+
+          if [[ -n "$LINEAR_ID" ]]; then
+            DEPLOY_TYPE="staging"
+            IMAGE_TAG="${LINEAR_ID,,}-${{ github.run_number }}"
+          else
+            DEPLOY_TYPE="none"
+            IMAGE_TAG="sha-${GITHUB_SHA::8}"
+          fi
+
+          echo "deploy_type=$DEPLOY_TYPE" >> "$GITHUB_OUTPUT"
+          echo "linear_id=$LINEAR_ID"     >> "$GITHUB_OUTPUT"
+          echo "project=${LINEAR_ID,,}"   >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG"     >> "$GITHUB_OUTPUT"
+
+  # ==========================================================
+  # 2. Build & Push — matrix sur les 3 apps
+  # ==========================================================
+  build:
+    name: Build ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    needs: context
+    if: needs.context.outputs.deploy_type != 'none'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: web-app
+            dockerfile: web-app.dockerfile
+            image: web-app
+          - app: host-app
+            dockerfile: host-app.dockerfile
+            image: host-app
+          - app: landing-page
+            dockerfile: landing-page.dockerfile
+            image: landing-page
+
+    steps:
+      # Checkout avant Auth GCP (évite l'écrasement du fichier credentials)
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker pour GAR
+        run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
+
+      - name: Build & Push ${{ matrix.app }}
+        run: |
+          IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:${{ needs.context.outputs.image_tag }}"
+          LATEST_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:latest"
+
+          docker build \
+            --file "${{ matrix.dockerfile }}" \
+            --tag "$IMAGE_URL" \
+            --label "git-commit=${{ github.sha }}" \
+            --label "git-ref=${{ github.ref_name }}" \
+            --cache-from "$LATEST_URL" \
+            .
+
+          docker push "$IMAGE_URL"
+
+  # ==========================================================
+  # 3. Update sysadmin — un seul commit pour les 3 apps
+  # ==========================================================
+  update-sysadmin:
+    name: Update sysadmin
+    runs-on: ubuntu-latest
+    needs: [context, build]
+    if: needs.context.outputs.deploy_type == 'staging'
+
+    steps:
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+
+      - name: Checkout sysadmin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SYSADMIN_REPO }}
+          ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+          ref: main
+
+      - name: Mettre à jour override web staging
+        run: |
+          PROJECT="${{ needs.context.outputs.project }}"
+          TAG="${{ needs.context.outputs.image_tag }}"
+          GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
+          OVERRIDE="web/patches/${PROJECT}.override.yml"
+
+          # Écrire les 3 services en une seule passe
+          printf 'services:\n  web-landing:\n    image: %s\n  web-webapp:\n    image: %s\n  web-hostapp:\n    image: %s\n' \
+            "${GAR}/landing-page:${TAG}" \
+            "${GAR}/web-app:${TAG}" \
+            "${GAR}/host-app:${TAG}" \
+            > "$OVERRIDE"
+
+          echo "Override web mis à jour : $OVERRIDE"
+          cat "$OVERRIDE"
+
+      - name: Commit & push sysadmin
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add --all
+
+          if git diff --cached --quiet; then
+            echo "Aucun changement à commiter"
+            exit 0
+          fi
+
+          TAG="${{ needs.context.outputs.image_tag }}"
+          LINEAR="${{ needs.context.outputs.linear_id }}"
+          git commit -m "deploy(staging): frontend ${TAG} [${LINEAR}]"
+
+          for attempt in $(seq 1 5); do
+            git push origin main && break
+            echo "Push échoué (tentative $attempt/5) — rebase..."
+            git pull --rebase origin main
+            sleep $((attempt * 3))
+          done
+
+  # ==========================================================
+  # 4. Deploy web stack sur staging
+  # ==========================================================
+  deploy:
+    name: Deploy web → Staging
+    runs-on: ubuntu-latest
+    needs: [context, update-sysadmin]
+    if: inputs.NEEDS_DEPLOY && needs.context.outputs.deploy_type == 'staging'
+
+    steps:
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch secrets (Bitwarden)
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
+            CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/staging_ci
+          chmod 600 ~/.ssh/staging_ci
+
+      - name: Deploy web → Staging via IAP tunnel
+        run: |
+          PROJECT="${{ needs.context.outputs.project }}"
+          GAR_TOKEN=$(gcloud auth print-access-token)
+
+          gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
+            --local-host-port=localhost:2222 \
+            --zone=${{ env.GCP_ZONE }} \
+            --project=${{ env.GCP_PROJECT }} &
+          IAP_PID=$!
+          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
+
+          ssh -i ~/.ssh/staging_ci \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -p 2222 root@localhost "
+            set -euo pipefail
+
+            echo '${GAR_TOKEN}' | docker login \
+              -u oauth2accesstoken --password-stdin \
+              ${{ env.GAR_REGISTRY }}
+
+            cd ${{ env.SYSADMIN_PATH }}
+            git pull --ff-only origin main
+
+            if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
+              ./staging/deploy.sh ${PROJECT^^}
+            else
+              docker compose \
+                -p ${PROJECT} \
+                -f web/patches/build-staging.yml \
+                -f web/patches/${PROJECT}.override.yml \
+                up -d --no-deps --force-recreate \
+                web-landing web-webapp web-hostapp
+            fi
+          "
+          kill $IAP_PID || true
+
+      - name: Slack — résultat
+        if: env.STAGING_SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🎨 *Frontend staging* — *${{ needs.context.outputs.linear_id }}*\nTag : `${{ needs.context.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
