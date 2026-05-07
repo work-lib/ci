@@ -345,7 +345,14 @@ jobs:
           fi
 
           git commit -m "$MSG"
-          git push origin main
+
+          # Retry + rebase pour gérer les pushes concurrents (plusieurs services en même temps)
+          for attempt in $(seq 1 5); do
+            git push origin main && break
+            echo "Push échoué (tentative $attempt/5) — rebase et retry..."
+            git pull --rebase origin main
+            sleep $((attempt * 3))
+          done
 
   # ==========================================================
   # 3. Deploy — SSH sur la VM et apply
@@ -373,7 +380,6 @@ jobs:
             CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
-            CI_PROD_SSH_KEY:PROD_SSH_KEY:notes
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
