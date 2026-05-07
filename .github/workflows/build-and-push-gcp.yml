@@ -380,6 +380,8 @@ jobs:
             CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
+            CI_STAGING_PRODUCTION_ENV:STAGING_PRODUCTION_ENV:notes
+            CI_STAGING_STAGING_ENV:STAGING_STAGING_ENV:notes
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
@@ -513,6 +515,12 @@ jobs:
             echo '${GAR_TOKEN}' | docker login \
               -u oauth2accesstoken --password-stdin \
               ${{ env.GAR_REGISTRY }}
+
+            # Provisionner les env files si absents (secrets gitignorés)
+            CONF_DIR=${{ env.SYSADMIN_PATH }}/services/conf
+            mkdir -p \$CONF_DIR
+            [[ -f \$CONF_DIR/production.env ]] || printf '%s' '${STAGING_PRODUCTION_ENV}' > \$CONF_DIR/production.env
+            [[ -f \$CONF_DIR/staging.env   ]] || printf '%s' '${STAGING_STAGING_ENV}'    > \$CONF_DIR/staging.env
 
             cd ${{ env.SYSADMIN_PATH }}
             git pull --ff-only origin main
