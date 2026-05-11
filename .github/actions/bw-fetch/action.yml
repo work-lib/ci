@@ -44,8 +44,8 @@ runs:
         BW_MASTER=$(gcloud secrets versions access latest \
           --secret=BW_MASTER_PASSWORD --project="$GCP_PROJECT")
 
-        bw config server "$BW_SERVER" > /dev/null
         bw logout > /dev/null 2>&1 || true
+        bw config server "$BW_SERVER" > /dev/null
 
         # Login API key + unlock master password
         export BW_CLIENTID BW_CLIENTSECRET
