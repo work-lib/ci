@@ -380,6 +380,7 @@ jobs:
             CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
+            CI_PROD_SSH_KEY:PROD_SSH_KEY:notes
 
       # Groupes d'env staging depuis Bitwarden (convention STAGING_* — notes = KEY=VALUE)
       # Voir sysadmin/services/conf/bitwarden.md pour la structure de chaque item
@@ -401,6 +402,26 @@ jobs:
             STAGING_BILLING:STAGING_BILLING:notes
             STAGING_APP:STAGING_APP:notes
             STAGING_MONGODB:STAGING_MONGODB:notes
+
+      # Groupes d'env prod depuis Bitwarden (convention PROD_* — notes = KEY=VALUE)
+      - name: Fetch secrets — groupes env prod (Bitwarden)
+        if: needs.build.outputs.deploy_type == 'prod'
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            PROD_DB:PROD_DB:notes
+            PROD_AUTH:PROD_AUTH:notes
+            PROD_STRIPE:PROD_STRIPE:notes
+            PROD_SMTP:PROD_SMTP:notes
+            PROD_GOOGLE:PROD_GOOGLE:notes
+            PROD_LINKEDIN:PROD_LINKEDIN:notes
+            PROD_HUBSPOT:PROD_HUBSPOT:notes
+            PROD_TWILIO:PROD_TWILIO:notes
+            PROD_MONITORING:PROD_MONITORING:notes
+            PROD_MAILCHIMP:PROD_MAILCHIMP:notes
+            PROD_BILLING:PROD_BILLING:notes
+            PROD_MONGODB:PROD_MONGODB:notes
+            PROD_SLACK:PROD_SLACK:notes
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
@@ -445,6 +466,22 @@ jobs:
         run: |
           JOB_NAME="migration-${{ needs.build.outputs.service }}-${{ github.run_id }}"
 
+          # Réutilise ENV_B64 du bloc PROD_* (même ENV_EXPORTS construit plus haut)
+          # Note : ce step s'exécute avant Deploy → le bloc doit être reconstruit
+          PROD_GROUPS=(PROD_DB PROD_AUTH PROD_STRIPE PROD_SMTP PROD_GOOGLE PROD_LINKEDIN PROD_HUBSPOT PROD_TWILIO PROD_MONITORING PROD_MAILCHIMP PROD_BILLING PROD_MONGODB PROD_SLACK)
+          ENV_EXPORTS=""
+          for group in "${PROD_GROUPS[@]}"; do
+            group_val="${!group:-}"
+            [[ -z "$group_val" ]] && continue
+            while IFS= read -r line; do
+              [[ -z "$line" || "$line" == \#* ]] && continue
+              key="${line%%=*}"; val="${line#*=}"
+              [[ -z "$key" || "$key" == "$line" ]] && continue
+              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
+            done <<< "$group_val"
+          done
+          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
+
           gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
             --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
@@ -456,6 +493,8 @@ jobs:
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -p 2222 root@localhost "
             set -euo pipefail
+            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
+
             docker service create \
               --name $JOB_NAME \
               --mode replicated-job \
@@ -485,6 +524,27 @@ jobs:
           STACK_DIR="${{ inputs.STACK_DIR }}"
           STACK="${{ inputs.STACK }}"
 
+          # ── Construire le bloc d'exports depuis les groupes PROD_* Bitwarden ─────────────
+          PROD_GROUPS=(
+            PROD_DB PROD_AUTH PROD_STRIPE PROD_SMTP
+            PROD_GOOGLE PROD_LINKEDIN PROD_HUBSPOT PROD_TWILIO
+            PROD_MONITORING PROD_MAILCHIMP PROD_BILLING
+            PROD_MONGODB PROD_SLACK
+          )
+          ENV_EXPORTS=""
+          for group in "${PROD_GROUPS[@]}"; do
+            group_val="${!group:-}"
+            [[ -z "$group_val" ]] && continue
+            while IFS= read -r line; do
+              [[ -z "$line" || "$line" == \#* ]] && continue
+              key="${line%%=*}"
+              val="${line#*=}"
+              [[ -z "$key" || "$key" == "$line" ]] && continue
+              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
+            done <<< "$group_val"
+          done
+          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
+
           gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
             --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
@@ -496,12 +556,16 @@ jobs:
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -p 2222 root@localhost "
             set -euo pipefail
+
+            # Injecter les vars d'env depuis Bitwarden (sans fichier persistant sur la VM)
+            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
+
             cd ${{ env.SYSADMIN_PATH }}
             git pull --ff-only origin main
             docker stack deploy \
               --with-registry-auth \
-              -c ${STACK_DIR}/patches/build-production.yml \
-              ${STACK}
+              -c '${STACK_DIR}/patches/build-production.yml' \
+              '${STACK}'
           "
           kill $IAP_PID || true
 
