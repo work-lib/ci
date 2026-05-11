@@ -373,15 +373,34 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Fetch secrets (Bitwarden)
+      - name: Fetch secrets — communs (Bitwarden)
         uses: work-lib/ci/.github/actions/bw-fetch@dev
         with:
           items: |
             CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
-            CI_STAGING_PRODUCTION_ENV:STAGING_PRODUCTION_ENV:notes
-            CI_STAGING_STAGING_ENV:STAGING_STAGING_ENV:notes
+
+      # Groupes d'env staging depuis Bitwarden (convention STAGING_* — notes = KEY=VALUE)
+      # Voir sysadmin/services/conf/bitwarden.md pour la structure de chaque item
+      - name: Fetch secrets — groupes env staging (Bitwarden)
+        if: needs.build.outputs.deploy_type == 'staging'
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            STAGING_DB:STAGING_DB:notes
+            STAGING_AUTH:STAGING_AUTH:notes
+            STAGING_STRIPE:STAGING_STRIPE:notes
+            STAGING_SMTP:STAGING_SMTP:notes
+            STAGING_GOOGLE:STAGING_GOOGLE:notes
+            STAGING_LINKEDIN:STAGING_LINKEDIN:notes
+            STAGING_HUBSPOT:STAGING_HUBSPOT:notes
+            STAGING_TWILIO:STAGING_TWILIO:notes
+            STAGING_MONITORING:STAGING_MONITORING:notes
+            STAGING_MAILCHIMP:STAGING_MAILCHIMP:notes
+            STAGING_BILLING:STAGING_BILLING:notes
+            STAGING_APP:STAGING_APP:notes
+            STAGING_MONGODB:STAGING_MONGODB:notes
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
@@ -500,6 +519,31 @@ jobs:
           # Passé à la VM via SSH pour docker login — pas de credentials sur la VM
           GAR_TOKEN=$(gcloud auth print-access-token)
 
+          # ── Construire le bloc d'exports depuis les groupes Bitwarden ──────────────────
+          # Chaque groupe (STAGING_DB, STAGING_AUTH…) contient des lignes KEY=VALUE dans ses notes.
+          # On parse ici, on base64-encode le résultat pour une transmission SSH sans problème
+          # de caractères spéciaux ou de citations — aucun fichier persistant sur la VM.
+          STAGING_GROUPS=(
+            STAGING_DB STAGING_AUTH STAGING_STRIPE STAGING_SMTP
+            STAGING_GOOGLE STAGING_LINKEDIN STAGING_HUBSPOT STAGING_TWILIO
+            STAGING_MONITORING STAGING_MAILCHIMP STAGING_BILLING STAGING_APP
+            STAGING_MONGODB
+          )
+          ENV_EXPORTS=""
+          for group in "${STAGING_GROUPS[@]}"; do
+            group_val="${!group:-}"
+            [[ -z "$group_val" ]] && continue
+            while IFS= read -r line; do
+              [[ -z "$line" || "$line" == \#* ]] && continue
+              key="${line%%=*}"
+              val="${line#*=}"
+              [[ -z "$key" || "$key" == "$line" ]] && continue
+              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
+            done <<< "$group_val"
+          done
+          # Base64 sans retour à la ligne — safe dans une commande SSH entre guillemets simples
+          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
+
           gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
             --local-host-port=localhost:2222 \
             --zone=${{ env.GCP_ZONE }} \
@@ -516,24 +560,25 @@ jobs:
               -u oauth2accesstoken --password-stdin \
               ${{ env.GAR_REGISTRY }}
 
-            # Provisionner les env files si absents (secrets gitignorés)
-            CONF_DIR=${{ env.SYSADMIN_PATH }}/services/conf
-            mkdir -p \$CONF_DIR
-            [[ -f \$CONF_DIR/production.env ]] || printf '%s' '${STAGING_PRODUCTION_ENV}' > \$CONF_DIR/production.env
-            [[ -f \$CONF_DIR/staging.env   ]] || printf '%s' '${STAGING_STAGING_ENV}'    > \$CONF_DIR/staging.env
+            # Injecter les vars d'env depuis Bitwarden (sans fichier persistant sur la VM)
+            # Le bloc base64 est décodé et évalué : chaque 'export KEY=value' est exécuté
+            # dans le shell courant → hérité par docker compose via environment: (valeur null)
+            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
+
+            export LINEAR_ID='${PROJECT}'
 
             cd ${{ env.SYSADMIN_PATH }}
             git pull --ff-only origin main
 
-            if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
-              ./staging/deploy.sh ${PROJECT^^}
+            if ! docker compose -p '${PROJECT}' ps --quiet 2>/dev/null | grep -q .; then
+              ./staging/deploy.sh '${PROJECT^^}'
             else
               docker compose \
-                -p ${PROJECT} \
-                -f ${STACK_DIR}/patches/build-staging.yml \
-                -f ${STACK_DIR}/patches/${PROJECT}.override.yml \
+                -p '${PROJECT}' \
+                -f '${STACK_DIR}/patches/build-staging.yml' \
+                -f '${STACK_DIR}/patches/${PROJECT}.override.yml' \
                 up -d --no-deps --force-recreate \
-                ${SERVICE}
+                '${SERVICE}'
             fi
           "
           kill $IAP_PID || true
