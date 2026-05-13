@@ -241,11 +241,18 @@ jobs:
           ssh-private-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
 
       - name: Checkout sysadmin
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.SYSADMIN_REPO }}
-          ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
-          ref: main
+        # Clone manuel avec --force pour éviter le "cannot lock ref" lors de jobs concurrents
+        # (plusieurs services pushés simultanément → runners partagent le cache git sysadmin)
+        run: |
+          # Nettoyer tout résidu de run précédent sur ce runner
+          rm -rf .git
+          git init .
+          git remote add origin git@github.com:${{ env.SYSADMIN_REPO }}.git
+          # --force évite l'erreur "cannot lock ref" si le cache du runner est périmé
+          git fetch --force --depth=1 origin main
+          git checkout -B main FETCH_HEAD
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install yq
         run: |
@@ -347,10 +354,12 @@ jobs:
           git commit -m "$MSG"
 
           # Retry + rebase pour gérer les pushes concurrents (plusieurs services en même temps)
+          # --force sur fetch : compatible avec le clone shallow --depth=1 du step Checkout
           for attempt in $(seq 1 5); do
             git push origin main && break
             echo "Push échoué (tentative $attempt/5) — rebase et retry..."
-            git pull --rebase origin main
+            git fetch --force --depth=1 origin main
+            git rebase origin/main
             sleep $((attempt * 3))
           done
 
