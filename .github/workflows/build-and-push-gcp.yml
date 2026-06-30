@@ -313,7 +313,9 @@ jobs:
           npm install -g docker-compose-merge --silent
 
           STACK_DIR="${{ inputs.STACK_DIR }}"
-          PROD_ARGS=("$STACK_DIR/base/common.yml" "$STACK_DIR/base/swarm.yml")
+          PROD_ARGS=("$STACK_DIR/base/common.yml")
+          [[ -f "$STACK_DIR/base/infra.yml" ]] && PROD_ARGS+=("$STACK_DIR/base/infra.yml")
+          PROD_ARGS+=("$STACK_DIR/base/swarm.yml")
           while IFS= read -r f; do
             [[ -n "$f" ]] && PROD_ARGS+=("$f")
           done < <(find "$STACK_DIR/patches" -maxdepth 1 -name "*.yml" \
@@ -512,7 +514,7 @@ jobs:
             docker service create \
               --name $JOB_NAME \
               --mode replicated-job \
-              --network ornet \
+              --network argos \
               --restart-condition none \
               --with-registry-auth \
               ${{ needs.build.outputs.image_url }} \
