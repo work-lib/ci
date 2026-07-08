@@ -24,7 +24,9 @@ runs:
       shell: bash
       run: |
         if ! command -v bw &> /dev/null; then
-          npm install -g @bitwarden/cli --quiet 2>/dev/null
+          # Version épinglée : la 'latest' a introduit des régressions login/unlock
+          # contre le Vaultwarden self-hosted. 2026.4.1 = version validée en prod.
+          npm install -g @bitwarden/cli@2026.4.1 --quiet
         fi
 
     - name: Login Bitwarden via GCP SM
@@ -48,8 +50,9 @@ runs:
         bw config server "$BW_SERVER" > /dev/null
 
         # Login API key + unlock master password
+        # stdout muet (pas de fuite) mais stderr conservé pour diagnostiquer les échecs
         export BW_CLIENTID BW_CLIENTSECRET
-        bw login --apikey > /dev/null 2>&1
+        bw login --apikey > /dev/null
 
         BW_SESSION=$(bw unlock "$BW_MASTER" --raw)
         echo "BW_SESSION=$BW_SESSION" >> "$GITHUB_ENV"
