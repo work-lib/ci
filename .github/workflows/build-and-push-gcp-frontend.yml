@@ -106,10 +106,38 @@ jobs:
       - name: Configure Docker pour GAR
         run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
 
+      - name: Fetch translation secret (Bitwarden)
+        if: matrix.app == 'web-app' || matrix.app == 'host-app'
+        uses: work-lib/ci/.github/actions/bw-fetch@dev
+        with:
+          items: |
+            API_GATEWAY_STAGING:API_GATEWAY_STAGING_ENV:notes
+
+      - name: Prepare translation build secret
+        if: matrix.app == 'web-app' || matrix.app == 'host-app'
+        run: |
+          set -euo pipefail
+
+          NOTION_ACCESS_TOKEN="$(printf '%s\n' "$API_GATEWAY_STAGING_ENV" \
+            | awk -F= '$1 == "TRANSLATIONS_NOTION_ACCESS_TOKEN" {print substr($0, index($0, "=") + 1); exit}')"
+
+          if [[ -z "$NOTION_ACCESS_TOKEN" ]]; then
+            echo "TRANSLATIONS_NOTION_ACCESS_TOKEN absent de API_GATEWAY_STAGING"
+            exit 1
+          fi
+
+          echo "::add-mask::$NOTION_ACCESS_TOKEN"
+          printf 'NOTION_ACCESS_TOKEN=%s\n' "$NOTION_ACCESS_TOKEN" >> "$GITHUB_ENV"
+
       - name: Build & Push ${{ matrix.app }}
         run: |
           IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:${{ needs.context.outputs.image_tag }}"
           LATEST_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:latest"
+
+          SECRET_ARGS=()
+          if [[ -n "${NOTION_ACCESS_TOKEN:-}" ]]; then
+            SECRET_ARGS+=(--secret id=notion_access_token,env=NOTION_ACCESS_TOKEN)
+          fi
 
           docker build \
             --file "${{ matrix.dockerfile }}" \
@@ -117,6 +145,7 @@ jobs:
             --label "git-commit=${{ github.sha }}" \
             --label "git-ref=${{ github.ref_name }}" \
             --cache-from "$LATEST_URL" \
+            "${SECRET_ARGS[@]}" \
             .
 
           docker push "$IMAGE_URL"
