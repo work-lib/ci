@@ -290,6 +290,7 @@ jobs:
                 -p ${PROJECT} \
                 -f web/patches/build-staging.yml \
                 -f web/patches/${PROJECT}.override.yml \
+                -f web/patches/${PROJECT}.routing.override.yml \
                 up -d --no-deps --force-recreate \
                 web-landing web-webapp web-hostapp
             fi
