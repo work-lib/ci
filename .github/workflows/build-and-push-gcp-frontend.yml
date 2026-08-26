@@ -157,7 +157,7 @@ jobs:
     name: Update sysadmin
     runs-on: ubuntu-latest
     needs: [context, build]
-    if: needs.context.outputs.deploy_type == 'staging'
+    if: inputs.NEEDS_DEPLOY && needs.context.outputs.deploy_type == 'staging'
 
     steps:
       - name: Auth GCP
