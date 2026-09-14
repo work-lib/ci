@@ -87,7 +87,7 @@ jobs:
 
 
     - name: Checkout (push on branch or push on tag or workflow_dispatch without tag )
-      uses: actions/checkout@v2
+      uses: actions/checkout@v7
       with:
           fetch-depth: 0 # OR "2" -> To retrieve the preceding commit.
           ref: ${{ github.ref_name }}
@@ -192,48 +192,74 @@ jobs:
         echo "$migrationList" >> $GITHUB_OUTPUT
         echo "|" >> $GITHUB_OUTPUT
 
-    - uses: kanga333/variable-mapper@master
-      with:
-        mode: fill
-        key: "${{ steps.set-tag.outputs.branch }}"
-        map: |
-          {
-            "${{ inputs.PRODUCTION_BRANCH }}": {
-              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}",
-              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}",
-              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}",
-              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}",
-              "EKS_CLUSTER_NAME": "gek-prd",
-              "environment": "production",
-              "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
-            },
-            "${{ inputs.STAGING_BRANCH }}": {
-              "environment": "preprod",
-              "K8S_NAMESPACE":"worklib",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
-            },
-            "autotest": {
-              "environment": "autotest",
-              "K8S_NAMESPACE":"autotest"
-            },
-            ".*": {
-              "AWS_ACCESS_KEY_ID": "${{ secrets.AWS_ACCESS_KEY_ID_DEV }}",
-              "AWS_SECRET_ACCESS_KEY": "${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}",
-              "AWS_ROLE_EXTERNAL_ID": "${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}",
-              "AWS_ROLE_TO_ASSUME": "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}",
-              "ECR_REPOSITORY": "${{ steps.set-tag.outputs.ECR_REPOSITORY }}",
-              "EKS_CLUSTER_NAME": "gek-ppd",
-              "environment": "qa",
-              "K8S_NAMESPACE":"worklib-qa",
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
-            }
-          }
+    # Remplace kanga333/variable-mapper (abandonne depuis 2022, bloque en node16).
+    # Le mode "fill" de la map d'origine se resout ainsi : l'entree de la branche
+    # gagne, l'entree ".*" complete ce qu'elle ne definit pas -- d'ou
+    # ECR_REPOSITORY present aussi sur la branche de production.
+    - name: Map environment config
+      id: env-config
+      run: |
+        case "${{ steps.set-tag.outputs.branch }}" in
+          "${{ inputs.PRODUCTION_BRANCH }}")
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_PROD }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}"
+              echo "ECR_REPOSITORY=${{ steps.set-tag.outputs.ECR_REPOSITORY }}"
+              echo "EKS_CLUSTER_NAME=gek-prd"
+              echo "environment=production"
+              echo "K8S_NAMESPACE=worklib"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
+            } >> "$GITHUB_ENV"
+            ;;
+          "${{ inputs.STAGING_BRANCH }}")
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}"
+              echo "ECR_REPOSITORY=${{ steps.set-tag.outputs.ECR_REPOSITORY }}"
+              echo "EKS_CLUSTER_NAME=gek-ppd"
+              echo "environment=preprod"
+              echo "K8S_NAMESPACE=worklib"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
+            } >> "$GITHUB_ENV"
+            ;;
+          autotest)
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}"
+              echo "ECR_REPOSITORY=${{ steps.set-tag.outputs.ECR_REPOSITORY }}"
+              echo "EKS_CLUSTER_NAME=gek-ppd"
+              echo "environment=autotest"
+              echo "K8S_NAMESPACE=autotest"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+            } >> "$GITHUB_ENV"
+            ;;
+          *)
+            {
+              echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}"
+              echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}"
+              echo "AWS_ROLE_EXTERNAL_ID=${{ secrets.AWS_ROLE_EXTERNAL_ID_DEV }}"
+              echo "AWS_ROLE_TO_ASSUME=${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}"
+              echo "ECR_REPOSITORY=${{ steps.set-tag.outputs.ECR_REPOSITORY }}"
+              echo "EKS_CLUSTER_NAME=gek-ppd"
+              echo "environment=qa"
+              echo "K8S_NAMESPACE=worklib-qa"
+              echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}"
+            } >> "$GITHUB_ENV"
+            ;;
+        esac
 
     - name: Send notification to Slack
       id: slack
-      uses: slackapi/slack-github-action@v1.18.0
+      uses: slackapi/slack-github-action@v4
       with:
+        webhook: ${{ env.SLACK_WEBHOOK_URL }}
+        webhook-type: incoming-webhook
         # For posting a rich message using Block Kit
         payload: |
           {
@@ -248,13 +274,10 @@ jobs:
                 }
             ]
           }
-      env:
-        SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
 
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-access-key-id: ${{env.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key:  ${{env.AWS_SECRET_ACCESS_KEY }}
@@ -266,7 +289,7 @@ jobs:
 
     - name: Login to Amazon ECR
       id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build, tag, and push the image to Amazon ECR
       id: build-image-service
@@ -361,26 +384,24 @@ jobs:
     name: slackNotificationResult
     runs-on: ubuntu-latest
     steps:
-    - uses: kanga333/variable-mapper@master
-      with:
-        key: "${{ needs.build.outputs.branch }}"
-        map: |
-          {
-            "${{ inputs.PRODUCTION_BRANCH }}": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PRD_SLACK_WEBHOOK_URL }}"
-            },
-            "${{ inputs.STAGING_BRANCH }}": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.PPD_SLACK_WEBHOOK_URL }}"
-            },
-            ".*": {
-              "SLACK_WEBHOOK_URL" : "${{ secrets.QA_SLACK_WEBHOOK_URL }}"
-            }
-          }
+    - name: Set Slack webhook URL
+      run: |
+        case "${{ needs.build.outputs.branch }}" in
+          "${{ inputs.PRODUCTION_BRANCH }}")
+            echo "SLACK_WEBHOOK_URL=${{ secrets.PRD_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+          "${{ inputs.STAGING_BRANCH }}")
+            echo "SLACK_WEBHOOK_URL=${{ secrets.PPD_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+          *)
+            echo "SLACK_WEBHOOK_URL=${{ secrets.QA_SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV" ;;
+        esac
+
 
     - name: Send notification to Slack
       id: slack
-      uses: slackapi/slack-github-action@v1.18.0
+      uses: slackapi/slack-github-action@v4
       with:
+        webhook: ${{ env.SLACK_WEBHOOK_URL }}
+        webhook-type: incoming-webhook
         # For posting a rich message using Block Kit
         payload: |
           {
@@ -412,6 +433,3 @@ jobs:
                 }
             ]
           }
-      env:
-        SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

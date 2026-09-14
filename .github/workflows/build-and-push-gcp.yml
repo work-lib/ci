@@ -119,16 +119,16 @@ jobs:
       # Checkout en premier : évite que auth GCP crée son fichier credentials
       # dans le workspace avant que checkout l'écrase
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Auth GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       # Fetch WORKLIB_GITHUB_SSH_KEY depuis Bitwarden (pour docker build --ssh)
       - name: Fetch secrets (Bitwarden)
@@ -138,7 +138,7 @@ jobs:
             CI_WORKLIB_GITHUB_SSH_KEY:WORKLIB_GITHUB_SSH_KEY:notes
 
       - name: Setup SSH agent (WORKLIB_GITHUB_SSH_KEY)
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ env.WORKLIB_GITHUB_SSH_KEY }}
 
@@ -221,13 +221,13 @@ jobs:
 
     steps:
       - name: Auth GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Fetch secrets (Bitwarden)
         uses: work-lib/ci/.github/actions/bw-fetch@dev
@@ -236,7 +236,7 @@ jobs:
             CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
 
       - name: Setup SSH agent (SYSADMIN_DEPLOY_KEY)
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
 
@@ -374,13 +374,13 @@ jobs:
 
     steps:
       - name: Auth GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Fetch secrets — communs (Bitwarden)
         uses: work-lib/ci/.github/actions/bw-fetch@dev
@@ -428,21 +428,19 @@ jobs:
 
       - name: Slack — début (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.26.0
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        uses: slackapi/slack-github-action@v4
         with:
+          webhook: ${{ env.PRD_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🚀 *Deploy prod* — `${{ needs.build.outputs.service }}` `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
       - name: Slack — début (staging)
         if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.26.0
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        uses: slackapi/slack-github-action@v4
         with:
+          webhook: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🔧 *Deploy staging* — `${{ needs.build.outputs.service }}` sur *${{ needs.build.outputs.linear_id }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
@@ -700,13 +698,13 @@ jobs:
 
     steps:
       - name: Auth GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Fetch secrets (Bitwarden)
         uses: work-lib/ci/.github/actions/bw-fetch@dev
@@ -717,20 +715,18 @@ jobs:
 
       - name: Slack — résultat (prod)
         if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.26.0
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.PRD_SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        uses: slackapi/slack-github-action@v4
         with:
+          webhook: ${{ env.PRD_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* déployé en *production*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
 
       - name: Slack — résultat (staging)
         if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.26.0
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        uses: slackapi/slack-github-action@v4
         with:
+          webhook: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* — staging *${{ needs.build.outputs.linear_id }}*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
