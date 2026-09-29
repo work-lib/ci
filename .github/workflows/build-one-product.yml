@@ -320,6 +320,7 @@ jobs:
               -f ./${{ steps.set-tag.outputs.dockerfile }} \
               -t $IMAGE_FULL \
               .
+            echo "pushed=true" >> $GITHUB_OUTPUT
           else
             docker build \
               $SSH_ARGS \
@@ -331,9 +332,11 @@ jobs:
           echo "image=$IMAGE_FULL" >> $GITHUB_OUTPUT
 
       # Avec REGISTRY_CACHE, buildx pousse l'image lui-même (--push) : le driver docker-container
-      # ne la charge pas dans le daemon local, il n'y a donc rien à `docker push`.
+      # ne la charge pas dans le daemon local, il n'y a donc rien à `docker push`. La condition
+      # lit la sortie `pushed` du build plutôt que de recopier sa condition : une seule source de
+      # vérité, sinon une image pourrait n'être jamais poussée alors que le déploiement suit.
       - name: Push image to ECR
-        if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true' && inputs.REGISTRY_CACHE != true
+        if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true' && steps.build-image-service.outputs.pushed != 'true'
         run: docker push ${{ steps.build-image-service.outputs.image }}
 
       - name: Setup kubectl
