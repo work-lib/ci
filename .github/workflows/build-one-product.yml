@@ -33,6 +33,11 @@ on:
         type: string
         required: false
         default: "main"
+      REGISTRY_CACHE:
+        description: "Cache BuildKit stocké dans le repo ECR (buildx). Ne s'applique que quand l'image est poussée."
+        type: boolean
+        required: false
+        default: false
     secrets:
       WORKLIB_GITHUB_SSH_KEY:
         required: true
@@ -276,6 +281,12 @@ jobs:
           IMAGE_FULL="${REGISTRY}/${{ steps.set-tag.outputs.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}"
           echo "image=${IMAGE_FULL}" >> $GITHUB_OUTPUT
 
+      # Le cache registre exige le driver docker-container de buildx : le driver "docker" par
+      # défaut ne sait pas exporter de cache vers un registre.
+      - name: Set up Docker Buildx
+        if: inputs.NEEDS_IMAGE_BUILD == true && inputs.REGISTRY_CACHE == true && steps.set-tag.outputs.needs_push == 'true'
+        uses: docker/setup-buildx-action@v4
+
       - name: Build Docker image
         id: build-image-service
         if: inputs.NEEDS_IMAGE_BUILD == true
@@ -286,16 +297,46 @@ jobs:
           # SSH agent configuré par le step précédent si WORKLIB_GITHUB_SSH_KEY est défini
           SSH_ARGS=""
           [[ -n "${{ secrets.WORKLIB_GITHUB_SSH_KEY }}" ]] && SSH_ARGS="--ssh default"
-          docker build \
-            $SSH_ARGS \
-            --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
-            -f ./${{ steps.set-tag.outputs.dockerfile }} \
-            -t $IMAGE_FULL \
-            .
+
+          if [[ "${{ inputs.REGISTRY_CACHE }}" == "true" && "${{ steps.set-tag.outputs.needs_push }}" == "true" ]]; then
+            # Cache dans le repo ECR plutôt que type=gha : le cache GHA est cloisonné par ref, et
+            # les tags de release (les builds de prod) ne lisent que la branche par défaut, qui ne
+            # builde jamais. Un tag de cache par produit et par environnement, pour que dev et
+            # staging ne s'écrasent pas. Les cache mounts (store pnpm, .next/cache) ne sont pas
+            # exportés : c'est la layer d'install qui est réutilisée, tant que le lockfile ne bouge pas.
+            CACHE_REF="${IMAGE_FULL%:*}:buildcache-${{ inputs.MICROSERVICE }}-${{ inputs.ENVIRONMENT }}"
+            # BUILD_DATE invalide les étapes qui lisent une source externe (import Notion) : sans
+            # lui, une layer en cache resservirait des traductions périmées.
+            # ignore-error : un échec d'export du cache ne doit jamais faire échouer la livraison.
+            # --provenance=false : garder un manifeste d'image simple, comme `docker build`.
+            docker buildx build \
+              $SSH_ARGS \
+              --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
+              --build-arg BUILD_DATE="${{ github.run_id }}-${{ github.run_attempt }}" \
+              --cache-from type=registry,ref=$CACHE_REF \
+              --cache-to type=registry,ref=$CACHE_REF,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true \
+              --provenance=false \
+              --push \
+              -f ./${{ steps.set-tag.outputs.dockerfile }} \
+              -t $IMAGE_FULL \
+              .
+            echo "pushed=true" >> $GITHUB_OUTPUT
+          else
+            docker build \
+              $SSH_ARGS \
+              --secret id=notion_access_token,env=NOTION_ACCESS_TOKEN \
+              -f ./${{ steps.set-tag.outputs.dockerfile }} \
+              -t $IMAGE_FULL \
+              .
+          fi
           echo "image=$IMAGE_FULL" >> $GITHUB_OUTPUT
 
+      # Avec REGISTRY_CACHE, buildx pousse l'image lui-même (--push) : le driver docker-container
+      # ne la charge pas dans le daemon local, il n'y a donc rien à `docker push`. La condition
+      # lit la sortie `pushed` du build plutôt que de recopier sa condition : une seule source de
+      # vérité, sinon une image pourrait n'être jamais poussée alors que le déploiement suit.
       - name: Push image to ECR
-        if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true'
+        if: inputs.NEEDS_IMAGE_BUILD == true && steps.set-tag.outputs.needs_push == 'true' && steps.build-image-service.outputs.pushed != 'true'
         run: docker push ${{ steps.build-image-service.outputs.image }}
 
       - name: Setup kubectl
