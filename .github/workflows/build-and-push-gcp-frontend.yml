@@ -116,10 +116,21 @@ jobs:
             --tag "$IMAGE_URL" \
             --label "git-commit=${{ github.sha }}" \
             --label "git-ref=${{ github.ref_name }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --cache-from "$LATEST_URL" \
             .
 
           docker push "$IMAGE_URL"
+
+          # Tag immuable sha-<commit> : relie une image déployée (Portainer, dashboard
+          # Grafana Deployments) au commit source, quel que soit le tag de déploiement.
+          SHA_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:sha-${GITHUB_SHA::8}"
+          if [[ "$SHA_URL" != "$IMAGE_URL" ]]; then
+            docker tag "$IMAGE_URL" "$SHA_URL"
+            docker push "$SHA_URL"
+          fi
 
   # ==========================================================
   # 3. Update sysadmin — un seul commit pour les 3 apps
@@ -180,7 +191,9 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add --all
+          # Jamais les credentials éphémères de google-github-actions/auth
+          # (écrits dans le workspace = ce checkout sysadmin)
+          git add --all -- . ':!gha-creds-*.json'
 
           if git diff --cached --quiet; then
             echo "Aucun changement à commiter"
