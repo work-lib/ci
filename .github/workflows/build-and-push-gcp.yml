@@ -1,4 +1,4 @@
-name: Build & Push — Google Artifact Registry + Deploy Swarm/Staging
+name: Build & Push GCP — automatic staging, manual production
 
 # ============================================================
 # OfficeRiders — Workflow réutilisable (GCP / Docker Swarm)
@@ -15,13 +15,10 @@ name: Build & Push — Google Artifact Registry + Deploy Swarm/Staging
 #   Staging (branche LIN-xxx)
 #     → build + push image
 #     → services/patches/lin-234.override.yml mis à jour dans sysadmin
-#     → VM staging : git pull + deploy.sh (auto-découverte overrides)
+#     → snapshot sysadmin immuable, verrou VM, migrations puis deploy.sh
 #
-#   Production (git tag v*)
-#     → build + push image
-#     → services/patches/service-api-gateway.yml mis à jour dans sysadmin
-#     → docker-compose-merge régénère build-production.yml
-#     → prod-manager : git pull + docker stack deploy
+#   Production: build only. Manual releases are selected and confirmed in
+#   work-lib/sysadmin → Actions → GCP Production — manual release.
 #
 # Usage dans un repo service :
 #   uses: work-lib/ci/.github/workflows/build-and-push-gcp.yml@dev
@@ -69,7 +66,7 @@ on:
         default: false
 
       NEEDS_DEPLOY:
-        description: "Activer le déploiement auto (prod + staging)"
+        description: "Activer la publication et le déploiement staging (jamais la prod)"
         required: false
         type: boolean
         default: true
@@ -209,10 +206,13 @@ jobs:
   # 2. Mise à jour sysadmin (patch/override + commit + push)
   # ==========================================================
   update-sysadmin:
+    concurrency:
+      group: gcp-staging-config-${{ github.ref_name }}
+      cancel-in-progress: false
     name: Update sysadmin (${{ needs.build.outputs.deploy_type }})
     runs-on: ubuntu-latest
     needs: build
-    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type != 'none'
+    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type == 'staging'
 
     outputs:
       linear_id: ${{ needs.build.outputs.linear_id }}
@@ -257,7 +257,7 @@ jobs:
       - name: Install yq
         run: |
           wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64
           chmod +x /usr/local/bin/yq
 
       # --------------------------------------------------------
@@ -272,6 +272,13 @@ jobs:
           OVERRIDE="${{ inputs.STACK_DIR }}/patches/${PROJECT}.override.yml"
 
           if [[ -f "$OVERRIDE" ]]; then
+            CURRENT=$(SERVICE="$SERVICE" yq -r '.services[strenv(SERVICE)].image // ""' "$OVERRIDE")
+            if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
+              echo 'A newer service build is already selected; keeping it'
+              exit 0
+            fi
+          fi
+          if [[ -f "$OVERRIDE" ]]; then
             yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$OVERRIDE"
           else
             cat > "$OVERRIDE" <<EOF
@@ -282,60 +289,13 @@ jobs:
           fi
 
           echo "Override mis à jour : $OVERRIDE"
-          cat "$OVERRIDE"
-
-      # --------------------------------------------------------
-      # PROD — mettre à jour le patch du service + régénérer build-production.yml
-      # --------------------------------------------------------
-      - name: Mettre à jour patch prod
-        if: needs.build.outputs.deploy_type == 'prod'
-        run: |
-          SERVICE="${{ needs.build.outputs.service }}"
-          IMAGE_URL="${{ needs.build.outputs.image_url }}"
-          PATCH="${{ inputs.STACK_DIR }}/patches/${SERVICE}.yml"
-
-          if [[ -f "$PATCH" ]]; then
-            yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$PATCH"
-          else
-            cat > "$PATCH" <<EOF
-          services:
-            ${SERVICE}:
-              image: ${IMAGE_URL}
-          EOF
-          fi
-
-          echo "Patch mis à jour : $PATCH"
-          cat "$PATCH"
-
-      - name: Régénérer build-production.yml
-        if: needs.build.outputs.deploy_type == 'prod'
-        run: |
-          npm install -g docker-compose-merge --silent
-
-          STACK_DIR="${{ inputs.STACK_DIR }}"
-          PROD_ARGS=("$STACK_DIR/base/common.yml")
-          [[ -f "$STACK_DIR/base/infra.yml" ]] && PROD_ARGS+=("$STACK_DIR/base/infra.yml")
-          PROD_ARGS+=("$STACK_DIR/base/swarm.yml")
-          while IFS= read -r f; do
-            [[ -n "$f" ]] && PROD_ARGS+=("$f")
-          done < <(find "$STACK_DIR/patches" -maxdepth 1 -name "*.yml" \
-            ! -name "build-*" \
-            ! -name "*.staging.yml" \
-            ! -name "*.override.yml" \
-            | sort)
-
-          docker-compose-merge \
-            -i "${PROD_ARGS[@]}" \
-            -o "$STACK_DIR/patches/build-production.yml"
-
-          echo "build-production.yml régénéré"
 
       - name: Commit & push sysadmin
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add --all
+          git add services/patches/*.override.yml web/patches/*.override.yml
 
           if git diff --cached --quiet; then
             echo "Aucun changement à commiter"
@@ -357,378 +317,55 @@ jobs:
 
           # Retry + rebase pour gérer les pushes concurrents (plusieurs services en même temps)
           # --force sur fetch : compatible avec le clone shallow --depth=1 du step Checkout
+          PUSHED=false
           for attempt in $(seq 1 5); do
-            git push origin main && break
+            if git push origin main; then PUSHED=true; break; fi
             echo "Push échoué (tentative $attempt/5) — rebase et retry..."
             git fetch --force --depth=1 origin main
             git rebase origin/main
             sleep $((attempt * 3))
           done
+          [[ "$PUSHED" == true ]] || { echo "Unable to publish sysadmin staging config" >&2; exit 1; }
 
   # ==========================================================
   # 3. Deploy — SSH sur la VM et apply
   # ==========================================================
   deploy:
-    name: Deploy (${{ needs.build.outputs.deploy_type }})
+    name: Deploy GCP staging
     runs-on: ubuntu-latest
     needs: [build, update-sysadmin]
-    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type != 'none'
+    if: inputs.NEEDS_DEPLOY && needs.build.outputs.deploy_type == 'staging'
 
+    timeout-minutes: 90
     steps:
-      - name: Auth GCP
-        uses: google-github-actions/auth@v3
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v3
-
-      - name: Fetch secrets — communs (Bitwarden)
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Load staging SSH and sysadmin checkout credentials
         uses: work-lib/ci/.github/actions/bw-fetch@dev
         with:
           items: |
-            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
-            CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
-            CI_PROD_SSH_KEY:PROD_SSH_KEY:notes
-
-      # Groupes Bitwarden staging — infra partagée + un item par service
-      # Voir sysadmin/services/conf/bitwarden.md pour la structure de chaque item
-      - name: Fetch secrets — groupes env staging (Bitwarden)
-        if: needs.build.outputs.deploy_type == 'staging'
-        uses: work-lib/ci/.github/actions/bw-fetch@dev
+            CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
+      - uses: actions/checkout@v4
         with:
-          items: |
-            AMQP_STAGING:AMQP_STAGING:notes
-            REDIS_STAGING:REDIS_STAGING:notes
-            API_GATEWAY_STAGING:API_GATEWAY_STAGING:notes
-            AUTH_STAGING:AUTH_STAGING:notes
-            AVAILABILITY_STAGING:AVAILABILITY_STAGING:notes
-            CALENDAR_STAGING:CALENDAR_STAGING:notes
-            CUSTOMER_STAGING:CUSTOMER_STAGING:notes
-            HOSTAPP_STAGING:HOSTAPP_STAGING:notes
-            NOTIFICATIONS_STAGING:NOTIFICATIONS_STAGING:notes
-            SCHEDULER_STAGING:SCHEDULER_STAGING:notes
-
-      # Groupes Bitwarden prod — infra partagée + un item par service
-      - name: Fetch secrets — groupes env prod (Bitwarden)
-        if: needs.build.outputs.deploy_type == 'prod'
-        uses: work-lib/ci/.github/actions/bw-fetch@dev
-        with:
-          items: |
-            AMQP_PROD:AMQP_PROD:notes
-            REDIS_PROD:REDIS_PROD:notes
-            API_GATEWAY_PROD:API_GATEWAY_PROD:notes
-            AUTH_PROD:AUTH_PROD:notes
-            AVAILABILITY_PROD:AVAILABILITY_PROD:notes
-            CALENDAR_PROD:CALENDAR_PROD:notes
-            CUSTOMER_PROD:CUSTOMER_PROD:notes
-            HOSTAPP_PROD:HOSTAPP_PROD:notes
-            NOTIFICATIONS_PROD:NOTIFICATIONS_PROD:notes
-            SCHEDULER_PROD:SCHEDULER_PROD:notes
-
-      - name: Slack — début (prod)
-        if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v4
-        with:
-          webhook: ${{ env.PRD_SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🚀 *Deploy prod* — `${{ needs.build.outputs.service }}` `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
-
-      - name: Slack — début (staging)
-        if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v4
-        with:
-          webhook: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🔧 *Deploy staging* — `${{ needs.build.outputs.service }}` sur *${{ needs.build.outputs.linear_id }}*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
-
-      # --------------------------------------------------------
-      # Tunnel IAP — helper utilisé par staging et prod
-      # --------------------------------------------------------
-      - name: Setup SSH key
+          repository: work-lib/sysadmin
+          ref: main
+          ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+          path: sysadmin-snapshot
+          fetch-depth: 0
+      - name: Migrate and deploy staging through IAP
+        env:
+          TICKET: ${{ needs.build.outputs.linear_id }}
         run: |
-          mkdir -p ~/.ssh
-          if [[ -n "${STAGING_SSH_KEY:-}" ]]; then
-            printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/staging_ci
-            chmod 600 ~/.ssh/staging_ci
-          fi
-          if [[ -n "${PROD_SSH_KEY:-}" ]]; then
-            printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/prod_ci
-            chmod 600 ~/.ssh/prod_ci
-          fi
-
-      # --------------------------------------------------------
-      # Migration DB (prod uniquement, avant le deploy)
-      # --------------------------------------------------------
-      - name: Migration DB
-        if: inputs.NEEDS_MIGRATION && needs.build.outputs.deploy_type == 'prod'
-        run: |
-          JOB_NAME="migration-${{ needs.build.outputs.service }}-${{ github.run_id }}"
-
-          # Réutilise ENV_B64 du bloc *_PROD (même ENV_EXPORTS construit plus haut)
-          # Note : ce step s'exécute avant Deploy → le bloc doit être reconstruit
-          PROD_GROUPS=(AMQP_PROD REDIS_PROD API_GATEWAY_PROD AUTH_PROD AVAILABILITY_PROD CALENDAR_PROD CUSTOMER_PROD HOSTAPP_PROD NOTIFICATIONS_PROD SCHEDULER_PROD)
-          ENV_EXPORTS=""
-          for group in "${PROD_GROUPS[@]}"; do
-            group_val="${!group:-}"
-            [[ -z "$group_val" ]] && continue
-            while IFS= read -r line; do
-              [[ -z "$line" || "$line" == \#* ]] && continue
-              key="${line%%=*}"; val="${line#*=}"
-              [[ -z "$key" || "$key" == "$line" ]] && continue
-              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
-            done <<< "$group_val"
-          done
-          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
-
-          gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
-            --local-host-port=localhost:2222 \
-            --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} &
-          IAP_PID=$!
-          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
-
-          ssh -i ~/.ssh/prod_ci \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -p 2222 root@localhost "
-            set -euo pipefail
-            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
-
-            # ── Fail-fast : vars critiques pour la migration ───────────────────
-            _REQUIRED=(DB_HOST DB_NAME DB_USER DB_PASSWORD)
-            _missing=()
-            for _v in \"\${_REQUIRED[@]}\"; do
-              [[ -z \"\${!_v:-}\" ]] && _missing+=(\"\$_v\")
-            done
-            if [[ \${#_missing[@]} -gt 0 ]]; then
-              echo \"❌ Variables manquantes (Bitwarden) : \${_missing[*]}\" >&2
-              exit 1
-            fi
-
-            docker service create \
-              --name $JOB_NAME \
-              --mode replicated-job \
-              --network argos \
-              --restart-condition none \
-              --with-registry-auth \
-              ${{ needs.build.outputs.image_url }} \
-              node dist/migrate.js
-
-            for i in \$(seq 1 30); do
-              STATUS=\$(docker service ps $JOB_NAME --format '{{.CurrentState}}' | head -1)
-              echo \"Migration: \$STATUS\"
-              [[ \"\$STATUS\" == Complete* ]] && break
-              [[ \"\$STATUS\" == Failed* ]] && exit 1
-              sleep 10
-            done
-            docker service rm $JOB_NAME
-          "
-          kill $IAP_PID || true
-
-      # --------------------------------------------------------
-      # Deploy PROD
-      # --------------------------------------------------------
-      - name: Deploy → Swarm prod
-        if: needs.build.outputs.deploy_type == 'prod'
-        run: |
-          STACK_DIR="${{ inputs.STACK_DIR }}"
-          STACK="${{ inputs.STACK }}"
-
-          # ── Construire le bloc d'exports depuis les groupes *_PROD Bitwarden ──────────────
-          PROD_GROUPS=(
-            AMQP_PROD REDIS_PROD
-            API_GATEWAY_PROD AUTH_PROD AVAILABILITY_PROD CALENDAR_PROD
-            CUSTOMER_PROD HOSTAPP_PROD NOTIFICATIONS_PROD SCHEDULER_PROD
-          )
-          ENV_EXPORTS=""
-          for group in "${PROD_GROUPS[@]}"; do
-            group_val="${!group:-}"
-            [[ -z "$group_val" ]] && continue
-            while IFS= read -r line; do
-              [[ -z "$line" || "$line" == \#* ]] && continue
-              key="${line%%=*}"
-              val="${line#*=}"
-              [[ -z "$key" || "$key" == "$line" ]] && continue
-              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
-            done <<< "$group_val"
-          done
-          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
-
-          gcloud compute start-iap-tunnel ${{ env.PROD_MANAGER_VM }} 22 \
-            --local-host-port=localhost:2222 \
-            --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} &
-          IAP_PID=$!
-          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
-
-          ssh -i ~/.ssh/prod_ci \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -p 2222 root@localhost "
-            set -euo pipefail
-
-            # Injecter les vars d'env depuis Bitwarden (sans fichier persistant sur la VM)
-            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
-
-            # ── Fail-fast : vars critiques pour le stack prod ──────────────────
-            _REQUIRED=(
-              AMQP_HOST AMQP_USER AMQP_PASSWORD
-              REDIS_HOST REDIS_PASSWORD
-              DB_HOST DB_USER DB_PASSWORD
-            )
-            _missing=()
-            for _v in \"\${_REQUIRED[@]}\"; do
-              [[ -z \"\${!_v:-}\" ]] && _missing+=(\"\$_v\")
-            done
-            if [[ \${#_missing[@]} -gt 0 ]]; then
-              echo \"❌ Variables manquantes (Bitwarden) : \${_missing[*]}\" >&2
-              exit 1
-            fi
-
-            cd ${{ env.SYSADMIN_PATH }}
-            git pull --ff-only origin main
-            docker stack deploy \
-              --with-registry-auth \
-              -c '${STACK_DIR}/patches/build-production.yml' \
-              '${STACK}'
-          "
-          kill $IAP_PID || true
-
-      # --------------------------------------------------------
-      # Deploy STAGING
-      # --------------------------------------------------------
-      - name: Deploy → Staging
-        if: needs.build.outputs.deploy_type == 'staging'
-        run: |
-          PROJECT="${{ needs.build.outputs.project }}"
-          SERVICE="${{ needs.build.outputs.service }}"
-          STACK_DIR="${{ inputs.STACK_DIR }}"
-
-          # Token GAR court-terme généré par le runner (déjà auth WIF)
-          # Passé à la VM via SSH pour docker login — pas de credentials sur la VM
-          GAR_TOKEN=$(gcloud auth print-access-token)
-
-          # ── Construire le bloc d'exports depuis les groupes Bitwarden ──────────────────
-          # Chaque groupe (*_STAGING) contient des lignes KEY=VALUE dans ses notes.
-          # On parse ici, on base64-encode le résultat pour une transmission SSH sans problème
-          # de caractères spéciaux ou de citations — aucun fichier persistant sur la VM.
-          STAGING_GROUPS=(
-            AMQP_STAGING REDIS_STAGING
-            API_GATEWAY_STAGING AUTH_STAGING AVAILABILITY_STAGING CALENDAR_STAGING
-            CUSTOMER_STAGING HOSTAPP_STAGING NOTIFICATIONS_STAGING SCHEDULER_STAGING
-          )
-          ENV_EXPORTS=""
-          for group in "${STAGING_GROUPS[@]}"; do
-            group_val="${!group:-}"
-            [[ -z "$group_val" ]] && continue
-            while IFS= read -r line; do
-              [[ -z "$line" || "$line" == \#* ]] && continue
-              key="${line%%=*}"
-              val="${line#*=}"
-              [[ -z "$key" || "$key" == "$line" ]] && continue
-              ENV_EXPORTS+="$(printf 'export %s=%q\n' "$key" "$val")"
-            done <<< "$group_val"
-          done
-          # Base64 sans retour à la ligne — safe dans une commande SSH entre guillemets simples
-          ENV_B64=$(printf '%s' "$ENV_EXPORTS" | base64 -w0)
-
-          gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
-            --local-host-port=localhost:2222 \
-            --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} &
-          IAP_PID=$!
-          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
-
-          ssh -i ~/.ssh/staging_ci \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -p 2222 root@localhost "
-            set -euo pipefail
-
-            echo '${GAR_TOKEN}' | docker login \
-              -u oauth2accesstoken --password-stdin \
-              ${{ env.GAR_REGISTRY }}
-
-            # Injecter les vars d'env depuis Bitwarden (sans fichier persistant sur la VM)
-            # Le bloc base64 est décodé et évalué : chaque 'export KEY=value' est exécuté
-            # dans le shell courant → hérité par docker compose via environment: (valeur null)
-            eval \"\$(echo '${ENV_B64}' | base64 -d)\"
-
-            # ── Fail-fast : vars critiques pour le stack staging ───────────────
-            _REQUIRED=(
-              AMQP_HOST AMQP_USER AMQP_PASSWORD
-              REDIS_HOST REDIS_PASSWORD
-              DB_HOST DB_USER DB_PASSWORD
-            )
-            _missing=()
-            for _v in \"\${_REQUIRED[@]}\"; do
-              [[ -z \"\${!_v:-}\" ]] && _missing+=(\"\$_v\")
-            done
-            if [[ \${#_missing[@]} -gt 0 ]]; then
-              echo \"❌ Variables manquantes (Bitwarden) : \${_missing[*]}\" >&2
-              exit 1
-            fi
-
-            export LINEAR_ID='${PROJECT}'
-
-            cd ${{ env.SYSADMIN_PATH }}
-            git pull --ff-only origin main
-
-            if ! docker compose -p '${PROJECT}' ps --quiet 2>/dev/null | grep -q .; then
-              ./staging/deploy.sh '${PROJECT^^}'
-            else
-              docker compose \
-                -p '${PROJECT}' \
-                -f '${STACK_DIR}/patches/build-staging.yml' \
-                -f '${STACK_DIR}/patches/${PROJECT}.override.yml' \
-                up -d --no-deps --force-recreate \
-                '${SERVICE}'
-            fi
-          "
-          kill $IAP_PID || true
-
-  # ==========================================================
-  # 4. Notification finale
-  # ==========================================================
-  notification:
-    name: Notification finale
-    runs-on: ubuntu-latest
-    needs: [build, deploy]
-    if: always() && needs.build.outputs.deploy_type != 'none' && inputs.NEEDS_DEPLOY
-
-    steps:
-      - name: Auth GCP
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v3
-
-      - name: Fetch secrets (Bitwarden)
-        uses: work-lib/ci/.github/actions/bw-fetch@dev
-        with:
-          items: |
-            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
-            CI_PRD_SLACK_WEBHOOK_URL:PRD_SLACK_WEBHOOK_URL:password
-
-      - name: Slack — résultat (prod)
-        if: needs.build.outputs.deploy_type == 'prod' && env.PRD_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v4
-        with:
-          webhook: ${{ env.PRD_SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* déployé en *production*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
-
-      - name: Slack — résultat (staging)
-        if: needs.build.outputs.deploy_type == 'staging' && env.STAGING_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v4
-        with:
-          webhook: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"${{ needs.deploy.result == 'success' && '✅' || '❌' }} *${{ needs.build.outputs.service }}* — staging *${{ needs.build.outputs.linear_id }}*\nTag : `${{ needs.build.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+          set -euo pipefail
+          umask 077
+          KEY="$RUNNER_TEMP/gcp-staging-ssh"
+          trap 'rm -f "$KEY"' EXIT
+          test -n "${STAGING_SSH_KEY:-}"
+          printf '%s\n' "$STAGING_SSH_KEY" > "$KEY"
+          unset STAGING_SSH_KEY SYSADMIN_DEPLOY_KEY
+          python3 sysadmin-snapshot/scripts/ci/deploy-gcp.py staging --ticket "$TICKET" --key "$KEY"
+          echo "Staging: https://${TICKET,,}.staging.worklib.io" >> "$GITHUB_STEP_SUMMARY"

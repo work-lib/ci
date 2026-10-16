@@ -154,6 +154,9 @@ jobs:
   # 3. Update sysadmin — un seul commit pour les 3 apps
   # ==========================================================
   update-sysadmin:
+    concurrency:
+      group: gcp-staging-config-${{ github.ref_name }}
+      cancel-in-progress: false
     name: Update sysadmin
     runs-on: ubuntu-latest
     needs: [context, build]
@@ -187,6 +190,11 @@ jobs:
           ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
           ref: main
 
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
       - name: Mettre à jour override web staging
         run: |
           PROJECT="${{ needs.context.outputs.project }}"
@@ -194,22 +202,26 @@ jobs:
           GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
           OVERRIDE="web/patches/${PROJECT}.override.yml"
 
-          # Écrire les 3 services en une seule passe
-          printf 'services:\n  web-landing:\n    image: %s\n  web-webapp:\n    image: %s\n  web-hostapp:\n    image: %s\n' \
-            "${GAR}/landing-page:${TAG}" \
-            "${GAR}/web-app:${TAG}" \
-            "${GAR}/host-app:${TAG}" \
-            > "$OVERRIDE"
+          mkdir -p web/patches
+          [[ -f "$OVERRIDE" ]] || printf 'services: {}\n' > "$OVERRIDE"
+          CURRENT=$(yq -r '.services."web-webapp".image // ""' "$OVERRIDE")
+          if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
+            echo 'A newer frontend build is already selected; keeping it'
+            exit 0
+          fi
+          # Preserve routing, cookies and all ticket-specific environment values.
+          for pair in 'web-landing:landing-page' 'web-webapp:web-app' 'web-hostapp:host-app'; do
+            SERVICE="${pair%%:*}" IMAGE="${GAR}/${pair#*:}:${TAG}" yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE)' "$OVERRIDE"
+          done
 
           echo "Override web mis à jour : $OVERRIDE"
-          cat "$OVERRIDE"
 
       - name: Commit & push sysadmin
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add --all
+          git add services/patches/*.override.yml web/patches/*.override.yml
 
           if git diff --cached --quiet; then
             echo "Aucun changement à commiter"
@@ -220,88 +232,54 @@ jobs:
           LINEAR="${{ needs.context.outputs.linear_id }}"
           git commit -m "deploy(staging): frontend ${TAG} [${LINEAR}]"
 
+          PUSHED=false
           for attempt in $(seq 1 5); do
-            git push origin main && break
+            if git push origin main; then PUSHED=true; break; fi
             echo "Push échoué (tentative $attempt/5) — rebase..."
             git pull --rebase origin main
             sleep $((attempt * 3))
           done
+          [[ "$PUSHED" == true ]] || { echo "Unable to publish sysadmin staging config" >&2; exit 1; }
 
   # ==========================================================
   # 4. Deploy web stack sur staging
   # ==========================================================
   deploy:
-    name: Deploy web → Staging
+    name: Deploy GCP staging
     runs-on: ubuntu-latest
     needs: [context, update-sysadmin]
     if: inputs.NEEDS_DEPLOY && needs.context.outputs.deploy_type == 'staging'
 
+    timeout-minutes: 90
     steps:
-      - name: Auth GCP
-        uses: google-github-actions/auth@v3
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v3
-
-      - name: Fetch secrets (Bitwarden)
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Load staging SSH and sysadmin checkout credentials
         uses: work-lib/ci/.github/actions/bw-fetch@dev
         with:
           items: |
-            CI_STAGING_SLACK_WEBHOOK_URL:STAGING_SLACK_WEBHOOK_URL:password
             CI_STAGING_SSH_KEY:STAGING_SSH_KEY:notes
-
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/staging_ci
-          chmod 600 ~/.ssh/staging_ci
-
-      - name: Deploy web → Staging via IAP tunnel
-        run: |
-          PROJECT="${{ needs.context.outputs.project }}"
-          GAR_TOKEN=$(gcloud auth print-access-token)
-
-          gcloud compute start-iap-tunnel ${{ env.STAGING_VM }} 22 \
-            --local-host-port=localhost:2222 \
-            --zone=${{ env.GCP_ZONE }} \
-            --project=${{ env.GCP_PROJECT }} &
-          IAP_PID=$!
-          for i in $(seq 1 15); do nc -z localhost 2222 2>/dev/null && break || sleep 2; done
-
-          ssh -i ~/.ssh/staging_ci \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -p 2222 root@localhost "
-            set -euo pipefail
-
-            echo '${GAR_TOKEN}' | docker login \
-              -u oauth2accesstoken --password-stdin \
-              ${{ env.GAR_REGISTRY }}
-
-            cd ${{ env.SYSADMIN_PATH }}
-            git pull --ff-only origin main
-
-            if ! docker compose -p ${PROJECT} ps --quiet 2>/dev/null | grep -q .; then
-              ./staging/deploy.sh ${PROJECT^^}
-            else
-              docker compose \
-                -p ${PROJECT} \
-                -f web/patches/build-staging.yml \
-                -f web/patches/${PROJECT}.override.yml \
-                -f web/patches/${PROJECT}.routing.override.yml \
-                up -d --no-deps --force-recreate \
-                web-landing web-webapp web-hostapp
-            fi
-          "
-          kill $IAP_PID || true
-
-      - name: Slack — résultat
-        if: env.STAGING_SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v4
+            CI_SYSADMIN_DEPLOY_KEY:SYSADMIN_DEPLOY_KEY:notes
+      - uses: actions/checkout@v4
         with:
-          webhook: ${{ env.STAGING_SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"🎨 *Frontend staging* — *${{ needs.context.outputs.linear_id }}*\nTag : `${{ needs.context.outputs.image_tag }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Voir le run>"}}]}
+          repository: work-lib/sysadmin
+          ref: main
+          ssh-key: ${{ env.SYSADMIN_DEPLOY_KEY }}
+          path: sysadmin-snapshot
+          fetch-depth: 0
+      - name: Migrate and deploy staging through IAP
+        env:
+          TICKET: ${{ needs.context.outputs.linear_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KEY="$RUNNER_TEMP/gcp-staging-ssh"
+          trap 'rm -f "$KEY"' EXIT
+          test -n "${STAGING_SSH_KEY:-}"
+          printf '%s\n' "$STAGING_SSH_KEY" > "$KEY"
+          unset STAGING_SSH_KEY SYSADMIN_DEPLOY_KEY
+          python3 sysadmin-snapshot/scripts/ci/deploy-gcp.py staging --ticket "$TICKET" --key "$KEY"
+          echo "Staging: https://${TICKET,,}.staging.worklib.io" >> "$GITHUB_STEP_SUMMARY"
