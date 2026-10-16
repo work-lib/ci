@@ -263,73 +263,40 @@ jobs:
       # --------------------------------------------------------
       # STAGING — créer/mettre à jour l'override par env Linear
       # --------------------------------------------------------
-      - name: Mettre à jour override staging
-        if: needs.build.outputs.deploy_type == 'staging'
+      - name: Publish staging versions atomically
+        env:
+          PROJECT: ${{ needs.build.outputs.project }}
+          TAG: ${{ needs.build.outputs.image_tag }}
+          SERVICE: ${{ needs.build.outputs.service }}
+          IMAGE_URL: ${{ needs.build.outputs.image_url }}
+          STACK_DIR: ${{ inputs.STACK_DIR }}
         run: |
-          PROJECT="${{ needs.build.outputs.project }}"
-          SERVICE="${{ needs.build.outputs.service }}"
-          IMAGE_URL="${{ needs.build.outputs.image_url }}"
-          OVERRIDE="${{ inputs.STACK_DIR }}/patches/${PROJECT}.override.yml"
-
-          if [[ -f "$OVERRIDE" ]]; then
-            CURRENT=$(SERVICE="$SERVICE" yq -r '.services[strenv(SERVICE)].image // ""' "$OVERRIDE")
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          for attempt in $(seq 1 10); do
+            # Always reapply only our image on the latest snapshot; a shallow
+            # rebase can mistake neighboring image updates for file additions.
+            git fetch --depth=1 origin main
+            git checkout --detach FETCH_HEAD
+            [[ "$STACK_DIR" == services || "$STACK_DIR" == web ]] || exit 1
+            OVERRIDE="${STACK_DIR}/patches/${PROJECT}.override.yml"
+            mkdir -p "${STACK_DIR}/patches"
+            [[ -f "$OVERRIDE" ]] || printf 'services: {}\n' > "$OVERRIDE"
+            CURRENT=$(yq -r '.services[strenv(SERVICE)].image // ""' "$OVERRIDE")
             if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
-              echo 'A newer service build is already selected; keeping it'
-              exit 0
+              echo 'Newer service build already selected'; exit 0
             fi
-          fi
-          if [[ -f "$OVERRIDE" ]]; then
-            yq e -i ".services[\"${SERVICE}\"].image = \"${IMAGE_URL}\"" "$OVERRIDE"
-          else
-            cat > "$OVERRIDE" <<EOF
-          services:
-            ${SERVICE}:
-              image: ${IMAGE_URL}
-          EOF
-          fi
-
-          echo "Override mis à jour : $OVERRIDE"
-
-      - name: Commit & push sysadmin
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add services/patches/*.override.yml web/patches/*.override.yml
-
-          if git diff --cached --quiet; then
-            echo "Aucun changement à commiter"
-            exit 0
-          fi
-
-          TYPE="${{ needs.build.outputs.deploy_type }}"
-          SERVICE="${{ needs.build.outputs.service }}"
-          TAG="${{ needs.build.outputs.image_tag }}"
-          LINEAR="${{ needs.build.outputs.linear_id }}"
-
-          if [[ "$TYPE" == "prod" ]]; then
-            MSG="deploy(prod): ${SERVICE} ${TAG}"
-          else
-            MSG="deploy(staging): ${SERVICE} ${TAG} [${LINEAR}]"
-          fi
-
-          git commit -m "$MSG"
-
-          # Retry + rebase pour gérer les pushes concurrents (plusieurs services en même temps)
-          # --force sur fetch : compatible avec le clone shallow --depth=1 du step Checkout
-          PUSHED=false
-          for attempt in $(seq 1 5); do
-            if git push origin main; then PUSHED=true; break; fi
-            echo "Push échoué (tentative $attempt/5) — rebase et retry..."
-            git fetch --force --depth=1 origin main
-            git rebase origin/main
-            sleep $((attempt * 3))
+            yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE_URL)' "$OVERRIDE"
+            git add "$OVERRIDE"
+            git diff --cached --quiet && exit 0
+            git commit -m "deploy(staging): ${PROJECT} ${TAG}"
+            if git push origin HEAD:main; then exit 0; fi
+            sleep $((attempt * 2))
           done
-          [[ "$PUSHED" == true ]] || { echo "Unable to publish sysadmin staging config" >&2; exit 1; }
+          echo 'Unable to publish staging versions after retries' >&2
+          exit 1
 
-  # ==========================================================
-  # 3. Deploy — SSH sur la VM et apply
-  # ==========================================================
   deploy:
     name: Deploy GCP staging
     runs-on: ubuntu-latest

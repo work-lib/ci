@@ -195,55 +195,39 @@ jobs:
           wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64
           chmod +x /usr/local/bin/yq
 
-      - name: Mettre à jour override web staging
+      - name: Publish staging versions atomically
+        env:
+          PROJECT: ${{ needs.context.outputs.project }}
+          TAG: ${{ needs.context.outputs.image_tag }}
         run: |
-          PROJECT="${{ needs.context.outputs.project }}"
-          TAG="${{ needs.context.outputs.image_tag }}"
-          GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
-          OVERRIDE="web/patches/${PROJECT}.override.yml"
-
-          mkdir -p web/patches
-          [[ -f "$OVERRIDE" ]] || printf 'services: {}\n' > "$OVERRIDE"
-          CURRENT=$(yq -r '.services."web-webapp".image // ""' "$OVERRIDE")
-          if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
-            echo 'A newer frontend build is already selected; keeping it'
-            exit 0
-          fi
-          # Preserve routing, cookies and all ticket-specific environment values.
-          for pair in 'web-landing:landing-page' 'web-webapp:web-app' 'web-hostapp:host-app'; do
-            SERVICE="${pair%%:*}" IMAGE="${GAR}/${pair#*:}:${TAG}" yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE)' "$OVERRIDE"
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          for attempt in $(seq 1 10); do
+            # Always reapply only our image on the latest snapshot; a shallow
+            # rebase can mistake neighboring image updates for file additions.
+            git fetch --depth=1 origin main
+            git checkout --detach FETCH_HEAD
+            OVERRIDE="web/patches/${PROJECT}.override.yml"
+            mkdir -p web/patches
+            [[ -f "$OVERRIDE" ]] || printf 'services: {}\n' > "$OVERRIDE"
+            CURRENT=$(yq -r '.services."web-webapp".image // ""' "$OVERRIDE")
+            if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
+              echo 'Newer frontend build already selected'; exit 0
+            fi
+            GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
+            for pair in 'web-landing:landing-page' 'web-webapp:web-app' 'web-hostapp:host-app'; do
+              SERVICE="${pair%%:*}" IMAGE="${GAR}/${pair#*:}:${TAG}" yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE)' "$OVERRIDE"
+            done
+            git add "$OVERRIDE"
+            git diff --cached --quiet && exit 0
+            git commit -m "deploy(staging): ${PROJECT} ${TAG}"
+            if git push origin HEAD:main; then exit 0; fi
+            sleep $((attempt * 2))
           done
+          echo 'Unable to publish staging versions after retries' >&2
+          exit 1
 
-          echo "Override web mis à jour : $OVERRIDE"
-
-      - name: Commit & push sysadmin
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add services/patches/*.override.yml web/patches/*.override.yml
-
-          if git diff --cached --quiet; then
-            echo "Aucun changement à commiter"
-            exit 0
-          fi
-
-          TAG="${{ needs.context.outputs.image_tag }}"
-          LINEAR="${{ needs.context.outputs.linear_id }}"
-          git commit -m "deploy(staging): frontend ${TAG} [${LINEAR}]"
-
-          PUSHED=false
-          for attempt in $(seq 1 5); do
-            if git push origin main; then PUSHED=true; break; fi
-            echo "Push échoué (tentative $attempt/5) — rebase..."
-            git pull --rebase origin main
-            sleep $((attempt * 3))
-          done
-          [[ "$PUSHED" == true ]] || { echo "Unable to publish sysadmin staging config" >&2; exit 1; }
-
-  # ==========================================================
-  # 4. Deploy web stack sur staging
-  # ==========================================================
   deploy:
     name: Deploy GCP staging
     runs-on: ubuntu-latest
