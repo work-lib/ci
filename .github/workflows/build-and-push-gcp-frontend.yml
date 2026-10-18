@@ -2,7 +2,7 @@ name: Build & Push GCP — Frontend Monorepo (Staging/Linear)
 
 # ============================================================
 # Workflow réutilisable pour le monorepo frontend.
-# Construit web-app, host-app et landing-page en parallèle,
+# Construit web-app, host-app, landing-page et back-office en parallèle,
 # puis met à jour web/patches/<project>.override.yml dans sysadmin
 # et déploie le stack web sur la VM staging.
 #
@@ -68,7 +68,7 @@ jobs:
           echo "image_tag=$IMAGE_TAG"     >> "$GITHUB_OUTPUT"
 
   # ==========================================================
-  # 2. Build & Push — matrix sur les 3 apps
+  # 2. Build & Push — matrix sur les 4 apps
   # ==========================================================
   build:
     name: Build ${{ matrix.app }}
@@ -88,6 +88,9 @@ jobs:
           - app: landing-page
             dockerfile: landing-page.dockerfile
             image: landing-page
+          - app: back-office
+            dockerfile: back-office.dockerfile
+            image: back-office
 
     steps:
       # Checkout avant Auth GCP (évite l'écrasement du fichier credentials)
@@ -216,7 +219,7 @@ jobs:
               echo 'Newer frontend build already selected'; exit 0
             fi
             GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
-            for pair in 'web-landing:landing-page' 'web-webapp:web-app' 'web-hostapp:host-app'; do
+            for pair in 'web-landing:landing-page' 'web-webapp:web-app' 'web-hostapp:host-app' 'web-backoffice:back-office'; do
               SERVICE="${pair%%:*}" IMAGE="${GAR}/${pair#*:}:${TAG}" yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE)' "$OVERRIDE"
             done
             git add "$OVERRIDE"
