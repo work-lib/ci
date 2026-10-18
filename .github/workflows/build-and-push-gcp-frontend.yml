@@ -125,6 +125,22 @@ jobs:
           echo "::add-mask::$NOTION_ACCESS_TOKEN"
           printf 'NOTION_ACCESS_TOKEN=%s\n' "$NOTION_ACCESS_TOKEN" >> "$GITHUB_ENV"
 
+      - name: Verify back-office backend isolation
+        if: matrix.app == 'back-office'
+        run: |
+          set -euo pipefail
+          docker build --file back-office.dockerfile --target deps-install --tag bo-test-dependencies .
+          git archive HEAD | docker run --rm -i bo-test-dependencies sh -c '
+            tar -xf - -C /repo
+            cd /repo/apps/back-office
+            node ../../node_modules/vitest/vitest.mjs run \
+              src/utils/environments.test.ts \
+              src/utils/server/apiBaseUrl.test.ts \
+              src/utils/server/currentEnvironment.test.ts \
+              src/utils/server/systemApiKey.test.ts \
+              src/app/api/internal/environment/route.test.ts \
+              src/components/layout/EnvironmentSelect.test.tsx --maxWorkers=2'
+
       - name: Build & Push ${{ matrix.app }}
         run: |
           IMAGE_URL="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ matrix.image }}:${{ needs.context.outputs.image_tag }}"
