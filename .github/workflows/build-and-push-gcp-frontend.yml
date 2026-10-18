@@ -13,6 +13,11 @@ name: Build & Push GCP — Frontend Monorepo (Staging/Linear)
 on:
   workflow_call:
     inputs:
+      APPS:
+        description: "JSON build matrix; defaults to all four frontends"
+        required: false
+        type: string
+        default: '[{"app":"web-app","dockerfile":"web-app.dockerfile","image":"web-app"},{"app":"host-app","dockerfile":"host-app.dockerfile","image":"host-app"},{"app":"landing-page","dockerfile":"landing-page.dockerfile","image":"landing-page"},{"app":"back-office","dockerfile":"back-office.dockerfile","image":"back-office"}]'
       NEEDS_DEPLOY:
         description: "Activer le déploiement sur staging"
         required: false
@@ -78,19 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - app: web-app
-            dockerfile: web-app.dockerfile
-            image: web-app
-          - app: host-app
-            dockerfile: host-app.dockerfile
-            image: host-app
-          - app: landing-page
-            dockerfile: landing-page.dockerfile
-            image: landing-page
-          - app: back-office
-            dockerfile: back-office.dockerfile
-            image: back-office
+        include: ${{ fromJSON(inputs.APPS) }}
 
     steps:
       # Checkout avant Auth GCP (évite l'écrasement du fichier credentials)
