@@ -224,10 +224,6 @@ jobs:
             OVERRIDE="web/patches/${PROJECT}.override.yml"
             mkdir -p web/patches
             [[ -f "$OVERRIDE" ]] || printf 'services: {}\n' > "$OVERRIDE"
-            CURRENT=$(yq -r '.services."web-webapp".image // ""' "$OVERRIDE")
-            if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
-              echo 'Newer frontend build already selected'; exit 0
-            fi
             GAR="${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}"
             while IFS= read -r app; do
               case "$app" in
@@ -237,6 +233,10 @@ jobs:
                 back-office) SERVICE=web-backoffice ;;
                 *) echo 'Unsupported frontend application' >&2; exit 1 ;;
               esac
+              CURRENT=$(SERVICE="$SERVICE" yq -r '.services[strenv(SERVICE)].image // ""' "$OVERRIDE")
+              if [[ "$CURRENT" =~ :${PROJECT}-([0-9]+) ]] && (( BASH_REMATCH[1] > GITHUB_RUN_NUMBER )); then
+                echo "Newer build already selected for $SERVICE"; continue
+              fi
               SERVICE="$SERVICE" IMAGE="${GAR}/${app}:${TAG}" yq -i '.services[strenv(SERVICE)].image = strenv(IMAGE)' "$OVERRIDE"
             done < <(jq -r '.[].image' <<< "$APP_MATRIX")
             git add "$OVERRIDE"
