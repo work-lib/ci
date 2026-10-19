@@ -13,6 +13,11 @@ name: Build & Push GCP — Frontend Monorepo (Staging/Linear)
 on:
   workflow_call:
     inputs:
+      PRODUCTION_BRANCH:
+        description: "Main branch builds images only; production rollout stays manual"
+        required: false
+        type: string
+        default: "main"
       APPS:
         description: "JSON build matrix; defaults to all four frontends"
         required: false
@@ -59,7 +64,10 @@ jobs:
           REF_NAME="${{ github.ref_name }}"
           LINEAR_ID=$(echo "$REF_NAME" | grep -oiP '[A-Z]{2,8}-\d+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
 
-          if [[ -n "$LINEAR_ID" ]]; then
+          if [[ "$REF_NAME" == "${{ inputs.PRODUCTION_BRANCH }}" ]]; then
+            DEPLOY_TYPE="build"
+            IMAGE_TAG="sha-${GITHUB_SHA::8}"
+          elif [[ -n "$LINEAR_ID" ]]; then
             DEPLOY_TYPE="staging"
             IMAGE_TAG="${LINEAR_ID,,}-${{ github.run_number }}"
           else
