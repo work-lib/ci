@@ -164,8 +164,8 @@ jobs:
             --tag "$IMAGE_URL" \
             --label "git-commit=${{ github.sha }}" \
             --label "git-ref=${{ github.ref_name }}" \
-            --label "build-version=${{ github.sha }}-${{ github.run_id }}.${{ github.run_attempt }}" \
-            --build-arg "APP_VERSION=${{ github.sha }}-${{ github.run_id }}.${{ github.run_attempt }}" \
+            --label "build-version=${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --build-arg "APP_VERSION=${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}" \
             --build-arg "SOURCE_COMMIT=${{ github.sha }}" \
             --cache-from "$LATEST_URL" \
             "${SECRET_ARGS[@]}" \
